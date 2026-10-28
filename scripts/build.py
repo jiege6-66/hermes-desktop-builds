@@ -100,11 +100,15 @@ def main():
     if not Path(builder).is_file():raise RuntimeError('Cannot locate the installed electron-builder CLI')
     pack=WORK/'packed'
     staged_count=0
-    buildargs=[node,builder,{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never','-c.forceCodeSigning=false','-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]
+    # Native modules are already rebuilt and staged by upstream's own
+    # `npm run build`; electron-builder's redundant @electron/rebuild pass both
+    # duplicates that work and needs a full MSVC toolchain on Windows runners.
+    buildargs=[node,builder,{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never','-c.forceCodeSigning=false','-c.nativeModules.npmRebuild=false','-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]
     if target=='darwin':
         # Delay outer signing until all resources exist. Sign staged native bytes only
         # after upstream beforePack re-stages them, BEFORE ASAR hashes are computed.
-        buildargs+=['-c.mac.identity=null','-c.beforePack='+str(ROOT/'scripts/before-pack-macos.mjs')]
+        # electron-builder 27 moved the signing identity under mac.sign.
+        buildargs+=['-c.mac.sign=null','-c.beforePack='+str(ROOT/'scripts/before-pack-macos.mjs')]
         env['DESKTOP_BUILD_PYTHON']=sys.executable
         env['DESKTOP_BUILD_LOGS']=str(logs)
     cmd('electron-builder',buildargs,desktop)
