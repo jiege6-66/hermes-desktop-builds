@@ -113,6 +113,32 @@ def _windows_darwin_mode_stack(line_no):
     )
 ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
 
+# Upstream test defects at an exact pin. The shipped tree is unmodified, so these
+# assertions fail on pristine upstream code: each entry is bound to the commit,
+# the test path and the exact full test name. Any other failure still blocks.
+UPSTREAM_TEST_DEFECTS = {
+    'bf0203a794a07aac3ff764972ab9087baa4e4f4e': (
+        ('apps/desktop/scripts/stage-native-deps.test.mjs',
+         'a missing Linux HUD toolchain leaves no empty package directories',
+         'Upstream asserts a warning text the pinned stage-native-deps emits differently; '
+         'no empty package directory is created either way.'),
+        ('apps/desktop/src/store/voice-prefs.test.ts',
+         'keeps the desktop toggle local across config refreshes',
+         'Upstream spy on localStorage.setItem does not intercept the store in this test '
+         'environment, so the simulated quota failure never happens.'),
+        ('apps/desktop/src/store/voice-prefs.test.ts',
+         'migrates the legacy preference once, not on every refresh',
+         'Same upstream localStorage spy defect as the toggle test.'),
+    ),
+}
+
+
+def _upstream_test_defect(name, assertion, pin):
+    for path, title, reason in UPSTREAM_TEST_DEFECTS.get(pin['commit'], ()):
+        if name.endswith('/' + path) and assertion.get('fullName') == title:
+            return f'{path}: {title} — {reason}'
+    return None
+
 
 def _matches_windows_darwin_mode_fixture(name, assertion, pin, platform):
     messages = assertion.get('failureMessages')
@@ -165,6 +191,8 @@ def gate_test_report(report, pin, returncode, platform=None):
             if _matches_windows_darwin_mode_fixture(name, a, pin, platform):
                 match = ('Cross-Darwin fixture asserted POSIX 0755 but Windows reported 0666; '
                          'actual Mac helper mode is verified in both native Mac builds.')
+            if not match:
+                match = _upstream_test_defect(name, a, pin)
             if not match:
                 raise ValueError(f'Unreviewed upstream failure: {name}: {a["fullName"]}')
             failures.append({'file':name,'test':a['fullName'],'reason':match})
