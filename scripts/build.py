@@ -89,7 +89,15 @@ def main():
     (logs/'targeted-gate.json').write_text(json.dumps(targeted_gate,indent=2)+'\n')
     print('TARGETED SUITE:',json.dumps(targeted_gate),flush=True)
     cmd('build',npm+['run','build'],desktop)
-    builder=subprocess.check_output([node,'-p',"require.resolve('electron-builder/cli.js')"],cwd=desktop,env=env,text=True).strip()
+    # electron-builder 27 exposes no `./cli.js` subpath; resolve its bin entry from
+    # the installed package instead of guessing the dist layout.
+    BUILDER_BIN=("const{createRequire}=require('module');const path=require('path');const fs=require('fs');"
+                 "const r=createRequire(process.cwd()+path.sep+'package.json');"
+                 "const root=path.dirname(path.dirname(r.resolve('electron-builder')));"
+                 "const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));"
+                 "console.log(path.join(root,pkg.bin['electron-builder']))")
+    builder=subprocess.check_output([node,'-e',BUILDER_BIN],cwd=desktop,env=env,text=True).strip()
+    if not Path(builder).is_file():raise RuntimeError('Cannot locate the installed electron-builder CLI')
     pack=WORK/'packed'
     staged_count=0
     buildargs=[node,builder,{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never','-c.forceCodeSigning=false','-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]
