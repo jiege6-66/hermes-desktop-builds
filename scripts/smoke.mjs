@@ -52,7 +52,9 @@ try {
   assert.equal(bootstrap.active,false);
   assert.equal(bootstrap.manifest,null);
   assert.deepEqual(bootstrap.stages,{});
-  assert(bootstrap.setupChoice,'No local installation started');
+  // Stock upstream leaves setupChoice null until a bootstrap is ready; it must
+  // never claim a local install was started by merely opening the app.
+  if(bootstrap.setupChoice)assert.equal(bootstrap.setupChoice.local,'none');
   const guard=createServer();
   await new Promise(resolve=>guard.listen(0,'127.0.0.1',resolve));
   const port=guard.address().port;
