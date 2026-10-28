@@ -130,7 +130,11 @@ def command(args, cwd=None):
                                 text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise UpdateError('Command unavailable or timed out') from exc
-    require(result.returncode == 0, 'Command failed (output suppressed to protect credentials)')
+    if result.returncode:
+        # Name only the failing command and status: never its output, which can
+        # carry tokens or remote URLs.
+        label = ' '.join(str(part) for part in args[:3])
+        raise UpdateError(f'Command failed ({label}; exit {result.returncode}); output suppressed')
     return result.stdout.strip()
 
 
