@@ -68,7 +68,7 @@ def clean_environment(work, pin, inherited=None):
         'GIT_CONFIG_NOSYSTEM':'1', 'GIT_CONFIG_GLOBAL':str(home/'.gitconfig'),
         'GIT_TERMINAL_PROMPT':'0', 'GIT_CEILING_DIRECTORIES':str(work),
         'GITHUB_SHA':pin['commit'], 'GITHUB_REF_NAME':'main',
-        'NODE_OPTIONS':'--max-old-space-size=16384', 'TZ':'UTC', 'LANG':'C.UTF-8', 'CI':'1',
+        'NODE_OPTIONS':'--max-old-space-size=8192', 'TZ':'UTC', 'LANG':'C.UTF-8', 'CI':'1',
         'PYTHONNOUSERSITE':'1', 'PYTHONDONTWRITEBYTECODE':'1', 'PYTHONUTF8':'1',
     })
     return env
