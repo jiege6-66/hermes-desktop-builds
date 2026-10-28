@@ -32,7 +32,13 @@ import sys
 import time
 
 UPSTREAM = 'NousResearch/hermes-agent'
-DOWNSTREAM = 'frankhommers/hermes-desktop-builds'
+DOWNSTREAM = 'jiege6-66/hermes-desktop-builds'
+# Upstream stopped baking the desktop version into apps/desktop/package.json:
+# every release tree carries this placeholder and the real version is injected
+# at pack time from the release tag (see HERMES_PAYLOAD_VERSION in upstream's
+# desktop-bundled-release workflow). Treat the placeholder as "no version in
+# the tree" and take the release tag instead; anything else still fails closed.
+PLACEHOLDER_VERSIONS = frozenset({'0.0.0'})
 ROOT = Path(__file__).resolve().parents[1]
 SHA = re.compile(r'[0-9a-f]{40}')
 VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
@@ -69,6 +75,15 @@ def exact_tag(value):
     require(isinstance(value, str) and len(value) <= 80 and RELEASE_TAG.fullmatch(value),
             'Expected exact stable upstream release tag vN.N.N')
     return value
+
+
+def release_tag_version(value):
+    """The release tag is the only version an upstream release tree advertises.
+
+    Upstream ships every tree with a 0.0.0 placeholder and injects the packaged
+    version at pack time from the tag, so the tag is authoritative here too.
+    """
+    return exact_tag(value)[1:]
 
 
 def positive_int(value):
@@ -180,7 +195,7 @@ def compare_commits(api, current, candidate):
     return status
 
 
-def desktop_version(api, sha):
+def desktop_version(api, sha, release_tag=None):
     exact_sha(sha)
     content = api(f'repos/{UPSTREAM}/contents/apps/desktop/package.json?ref={sha}')
     require(isinstance(content, dict) and content.get('type') == 'file'
@@ -196,8 +211,13 @@ def desktop_version(api, sha):
     require(len(raw) == content['size'], 'package.json size mismatch')
     package = parse_json(raw)
     require(isinstance(package, dict), 'package.json must be an object')
-    version_tuple(package.get('version'))
-    return package['version']
+    declared = package.get('version')
+    if isinstance(declared, str) and declared in PLACEHOLDER_VERSIONS:
+        # No usable version in the tree; the admitted release tag is the identity.
+        require(release_tag is not None, 'Placeholder desktop version requires a release tag')
+        return release_tag_version(release_tag)
+    version_tuple(declared)
+    return declared
 
 
 def paginated(api, resource):
@@ -352,7 +372,7 @@ def plan_update(api, pin, base_sha):
     if status == 'identical':
         if 'releaseTag' not in pin or release['id'] != pin['releaseId']:
             return candidate, metadata
-        require(desktop_version(api, sha) == pin['version'], 'Pinned package version mismatch')
+        require(desktop_version(api, sha, pin['releaseTag']) == pin['version'], 'Pinned package version mismatch')
         versions = reserved_versions(api)
         current_version = (*version_tuple(pin['version']), pin['revision'])
         if any(version >= current_version for version in versions):
@@ -361,7 +381,7 @@ def plan_update(api, pin, base_sha):
             dispatch, reason = recovery_decision(api, pin, base_sha)
             metadata.update(action='dispatch' if dispatch else 'skip', reason=reason)
         return candidate, metadata
-    version = desktop_version(api, sha)
+    version = desktop_version(api, sha, release['tag'])
     numeric = version_tuple(version)
     require(numeric >= version_tuple(pin['version']), 'Refusing application version downgrade')
     versions = reserved_versions(api)

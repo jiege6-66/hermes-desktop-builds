@@ -1,17 +1,4 @@
 {
   "schema": 1,
-  "patches": [
-    {
-      "file": "remote-client-ui.patch",
-      "sha256": "181ba4d4fabb948a27a2d6ba48e46e71c988aab360b6dad0495d0cb85c13931a"
-    },
-    {
-      "file": "homebrew-client-updater.patch",
-      "sha256": "e04462f7951cc134ddef09b261bbd7334c6ec2e1bcdd2ec132dd8cfbd8e3c5f5"
-    },
-    {
-      "file": "upstream-build-fix.patch",
-      "sha256": "87ee9ccce5f80151ce1aa3b64ce9c1493205279b875e1153e8735d5f81f5ff7d"
-    }
-  ]
+  "patches": []
 }

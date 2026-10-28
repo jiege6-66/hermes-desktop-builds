@@ -78,6 +78,29 @@ class PlanTests(unittest.TestCase):
         candidate, _ = self.plan(FixtureAPI(version='0.100.0'))
         self.assertEqual(candidate['revision'], 1)
 
+    def test_placeholder_tree_uses_release_tag_version(self):
+        # Upstream ships apps/desktop/package.json at 0.0.0 and injects the real
+        # version at pack time. The tag is the only admitted identity.
+        api = FixtureAPI(version='0.0.0')
+        candidate, meta = self.plan(api)
+        self.assertEqual((candidate['version'], candidate['revision']), ('2026.9.6', 1))
+        self.assertEqual(candidate['releaseTag'], 'v2026.9.6')
+        self.assertEqual(meta['action'], 'update')
+        self.assertTrue(meta['changed'])
+
+    def test_placeholder_without_release_tag_fails_closed(self):
+        api = FixtureAPI(version='0.0.0')
+        with self.assertRaisesRegex(u.UpdateError, 'release tag'):
+            u.desktop_version(api, NEW)
+
+    def test_version_below_placeholder_is_still_a_real_version(self):
+        # Only the exact 0.0.0 placeholder is special; near-misses stay ordinary
+        # versions, so 0.0.1 is a downgrade from 0.17.0 instead of silently
+        # becoming the tag version.
+        api = FixtureAPI(version='0.0.1')
+        with self.assertRaisesRegex(u.UpdateError, 'downgrade'):
+            self.plan(api)
+
     def test_all_pages_public_prerelease_draft_and_orphan_tags_reserve_versions(self):
         api = FixtureAPI()
         path = f'repos/{u.DOWNSTREAM}/releases?per_page=100&page='

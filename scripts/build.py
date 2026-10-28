@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 
-from common import ROOT, WORK, OUT, load_pin, release_version, archive_name, clean_environment, run, gate_test_report
+from common import ROOT, WORK, OUT, load_pin, release_version, archive_name, dmg_name, clean_environment, run, gate_test_report
 from package import digest, native_inventory, inventory, make_archive, unpack_archive
 from macos_signing import verify_bundle, verify_extracted
 from source_patches import apply_patches, verify_source_state
@@ -36,9 +36,6 @@ def main():
     label=f'{target}-{arch}'
     out=OUT/label;logs=out/'logs';logs.mkdir(parents=True,exist_ok=True)
     env=clean_environment(WORK,pin)
-    if target=='darwin':
-        env['HERMES_DESKTOP_DISTRIBUTION']='frankhommers-homebrew'
-        env['HERMES_DESKTOP_DISTRIBUTION_VERSION']=version
     node=shutil.which('node');git=shutil.which('git');npm_path=shutil.which('npm.cmd' if os.name=='nt' else 'npm')
     if not all((node,git,npm_path)):raise RuntimeError('Node, npm and Git are required')
     npm_file=Path(npm_path).parent/'node_modules/npm/bin/npm-cli.js' if os.name=='nt' else Path(npm_path).resolve()
@@ -57,7 +54,10 @@ def main():
     sha=subprocess.check_output([git,'rev-parse','HEAD'],cwd=src,env=env,text=True).strip()
     if sha!=pin['commit']:raise RuntimeError('Fetched commit does not match pin')
     desktop=src/'apps/desktop';pkg=json.loads((desktop/'package.json').read_text())
-    if pkg['version']!=pin['version']:raise RuntimeError('Upstream version does not match pin')
+    # Upstream ships every release tree at the 0.0.0 placeholder and injects the
+    # packaged version at pack time from the release tag (the pin keeps that tag's
+    # version). Accept the placeholder, refuse anything else that disagrees.
+    if pkg['version'] not in (pin['version'],'0.0.0'):raise RuntimeError('Upstream version does not match pin')
     source_patch=apply_patches(src,pin,env=env)
     (logs/'source-patch.json').write_text(json.dumps(source_patch,indent=2)+'\n')
     cmd('npm-ci',npm+['ci','--ignore-scripts','--no-audit','--no-fund','--workspace','apps/desktop','--include-workspace-root'],src)
@@ -73,14 +73,12 @@ def main():
     targeted=['electron/first-run-setup-main-process.test.ts','electron/first-run-setup-gate.test.ts',
               'electron/primary-backend-startup.test.ts','src/components/desktop-install-overlay.test.tsx',
               'src/app/chat/sidebar/fleet-rail.test.ts','src/app/chat/sidebar/profile-rail-fleet.test.tsx',
-              'src/app/chat/sidebar/fleet-rail-community.test.ts','electron/community-homebrew-update.test.ts',
               'src/store/voice-prefs.test.ts','src/lib/version-status.test.ts',
               'scripts/write-build-stamp.test.mjs',
               'src/app/chat/sidebar/connection-switcher.test.tsx','src/app/settings/connections-registry.test.tsx',
               'scripts/stage-native-deps.test.mjs','scripts/before-pack.test.mjs']
     # This upstream SSH suite exercises POSIX ControlMaster socket semantics and
-    # contains POSIX path assertions. Our patch changes only the non-Windows
-    # default control directory; keep testing it on both native POSIX hosts.
+    # contains POSIX path assertions; run it on both native POSIX hosts only.
     if target!='win32':
         targeted.append('electron/ssh-connection.test.ts')
     env['DESKTOP_TEST_RECEIPT']=str(logs/'targeted-completion.json')
@@ -94,7 +92,7 @@ def main():
     builder=subprocess.check_output([node,'-p',"require.resolve('electron-builder/cli.js')"],cwd=desktop,env=env,text=True).strip()
     pack=WORK/'packed'
     staged_count=0
-    buildargs=[node,builder,{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never','-c.forceCodeSigning=false','-c.directories.output='+str(pack)]
+    buildargs=[node,builder,{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never','-c.forceCodeSigning=false','-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]
     if target=='darwin':
         # Delay outer signing until all resources exist. Sign staged native bytes only
         # after upstream beforePack re-stages them, BEFORE ASAR hashes are computed.
@@ -134,6 +132,26 @@ def main():
     extracted=WORK/'extracted'
     unpack_archive(archive,extracted)
     if inventory(bundle)!=inventory(extracted/bundle.name):raise RuntimeError('Archive roundtrip changed file bytes/modes/symlinks')
+    # Mac install artifact: the ZIP above stays the byte-exact verification copy;
+    # the DMG is what users mount and drag into Applications.
+    dmg=None
+    if target=='darwin':
+        dmg=out/dmg_name(version,arch)
+        staging=WORK/'dmg'; staging.mkdir(exist_ok=True)
+        staged_app=staging/bundle.name
+        if staged_app.exists():shutil.rmtree(staged_app)
+        shutil.copytree(bundle,staged_app,symlinks=True)
+        applications=staging/'Applications'
+        if not applications.is_symlink():applications.symlink_to('/Applications')
+        cmd('hdiutil-create',['hdiutil','create','-volname','Hermes','-srcfolder',str(staging),'-ov','-format','UDZO',str(dmg)])
+        mount=WORK/'dmg-mount';mount.mkdir(exist_ok=True)
+        cmd('hdiutil-attach',['hdiutil','attach','-nobrowse','-readonly','-mountpoint',str(mount),str(dmg)])
+        try:
+            if inventory(mount/bundle.name)!=inventory(bundle):raise RuntimeError('DMG bundle changed file bytes/modes/symlinks')
+            if cmd('dmg-bundle-verify',['codesign','--verify','--deep','--strict','--verbose=2',str(mount/bundle.name)],allow_failure=True):
+                raise RuntimeError('DMG bundle signature failed')
+        finally:
+            cmd('hdiutil-detach',['hdiutil','detach',str(mount)],allow_failure=True)
     # Launch the extracted distribution, not the unarchived build tree.
     binary=extracted/bundle.name/('Contents/MacOS/Hermes' if target=='darwin' else 'Hermes.exe' if target=='win32' else 'Hermes')
     smoke_env=clean_environment(WORK/'smoke',pin)
@@ -168,15 +186,20 @@ def main():
         mac_signing=verify_extracted(extracted/bundle.name,arch,staged_count,cmd,logs)
         if inventory(bundle)!=inventory(extracted/bundle.name):raise RuntimeError('Mac negative tests did not restore exact bundle')
     verify_source_state(src,pin,source_patch,env=env)
-    manifest={'version':version,'upstream':pin,'platform':target,'arch':arch,'electron':pkg['build']['electronVersion'],
+    manifest={'version':version,'upstream':pin,'platform':target,'arch':arch,'electron':(pkg.get('build') or {}).get('electronVersion') or (pkg.get('devDependencies') or {}).get('electron'),
               'archive':archive.name,'sha256':digest(archive),'bytes':archive.stat().st_size,
-              'sourceClean':False,'sourceVerified':True,'sourcePatch':source_patch,
+              'sourceClean':not source_patch['patches'],'sourceVerified':True,'sourcePatch':source_patch,
               'archiveRoundtrip':True,'nativeSmoke':json.loads((logs/'smoke.json').read_text()),
               'fullSuite':gate,'targetedSuite':targeted_gate,'macSigning':mac_signing,
               'signing':'Ad-hoc signed; no Developer ID or Apple notarization' if target=='darwin' else 'No Authenticode/signing',
               'limitations':['No real remote credentials/login/chat tested','Not Apple-notarized; Gatekeeper rejects ad-hoc publisher trust','No Finder Open Anyway or SmartScreen acceptance test','No microphone/camera/screen/TCC end-to-end test','Native full UI suite runs on Linux only']}
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    (out/'SHA256SUMS').write_text(manifest['sha256']+'  '+archive.name+'\n')
+    checks=[manifest['sha256']+'  '+archive.name+'\n']
+    if dmg is not None:
+        manifest['dmg']={'name':dmg.name,'sha256':digest(dmg),'bytes':dmg.stat().st_size}
+        checks.append(manifest['dmg']['sha256']+'  '+dmg.name+'\n')
+        (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    (out/'SHA256SUMS').write_text(''.join(checks))
     print('VERIFIED DISTRIBUTION:',json.dumps(manifest),flush=True)
 
 if __name__=='__main__':main()

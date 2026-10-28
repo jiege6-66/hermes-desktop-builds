@@ -40,6 +40,11 @@ def archive_name(version, platform, arch):
     return f'Hermes-{version}-{platform}-{arch}-{signing}{suffix}'
 
 
+def dmg_name(version, arch):
+    """Disk image the Mac install path uses; the ZIP stays the verified archive."""
+    return f'Hermes-{version}-darwin-{arch}-adhoc.dmg'
+
+
 def clean_environment(work, pin, inherited=None):
     source = os.environ if inherited is None else inherited
     # Toolchain/OS plumbing only. No GitHub tokens, cloud keys, Python env or agent settings.

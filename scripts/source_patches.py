@@ -1,8 +1,9 @@
 """Apply hash-pinned source patches before building, then verify the exact tree.
 
-The upstream checkout is intentionally dirty after application: sourceClean must be
-false. A separate receipt records both Git trees and the checked-in patch hashes.
-Each named patch has a narrow fail-closed path allowlist; no fuzzy fallback, auto-repair,
+An empty patch set is supported and means the build ships the pristine pinned
+upstream tree: the receipt then records identical upstream and patched trees and
+sourceClean stays true. Any nonempty set must change the tree and each named
+patch keeps its narrow fail-closed path allowlist; no fuzzy fallback, auto-repair,
 upstream execution or credentials are involved here.
 """
 import hashlib
@@ -56,8 +57,8 @@ def patch_set(patch_dir=PATCH_DIR):
             or manifest['schema'] != 1 or set(manifest) != {'schema', 'patches'}):
         raise ValueError('Unsupported patch manifest')
     rows = manifest['patches']
-    if not isinstance(rows, list) or not rows:
-        raise ValueError('An explicit nonempty patch set is required')
+    if not isinstance(rows, list):
+        raise ValueError('Patch set must be an explicit list')
     names = set()
     for row in rows:
         if not isinstance(row, dict) or set(row) != {'file', 'sha256'}:
@@ -96,7 +97,9 @@ def validate_patch_receipt(receipt, pin, patch_dir=PATCH_DIR):
         value = receipt.get(key)
         if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{40}', value) or value == '0' * 40:
             raise ValueError('Invalid source tree identity: ' + key)
-    if receipt['upstreamTree'] == receipt['patchedTree']:
+    if receipt['upstreamTree'] != receipt['patchedTree'] and not expected['patches']:
+        raise ValueError('Unpatched builds must keep the pristine upstream tree')
+    if receipt['upstreamTree'] == receipt['patchedTree'] and expected['patches']:
         raise ValueError('Source patch set must change the source tree')
     return receipt
 

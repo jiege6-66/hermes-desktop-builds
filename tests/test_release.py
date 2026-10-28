@@ -7,26 +7,28 @@ from release import cask_text, prepare
 
 class ReleaseTests(unittest.TestCase):
     def test_cask_selects_arch_and_never_runs_installers(self):
-        assets={f'darwin-{a}':{'archive':f'Hermes-0.17.0.1-darwin-{a}-adhoc.zip','sha256':str(i)*64} for i,a in enumerate(('arm64','x64'),1)}
+        assets={f'darwin-{a}':{'archive':f'Hermes-0.17.0.1-darwin-{a}-adhoc.zip','sha256':str(i)*64,
+                              'dmg':{'name':f'Hermes-0.17.0.1-darwin-{a}-adhoc.dmg','sha256':str(i+2)*64}}
+                for i,a in enumerate(('arm64','x64'),1)}
         text=cask_text('0.17.0.1',assets)
         dependency=next(line.strip() for line in text.splitlines() if line.strip().startswith('depends_on macos:'))
         self.assertRegex(dependency,r'^depends_on macos: :[a-z][a-z0-9_]*$')
         self.assertNotIn('verified:',text)
         self.assertIn('on_arm do',text);self.assertIn('on_intel do',text)
         self.assertIn('app "Hermes.app"',text)
-        self.assertIn('This build can apply later Desktop updates in-app through Homebrew.',text)
-        self.assertIn('Remote backends are never updated by the Desktop updater.',text)
-        self.assertNotIn('not the in-app updater',text)
+        self.assertIn('Hermes-0.17.0.1-darwin-arm64-adhoc.dmg',text)
+        self.assertIn('Updates are delivered through this cask only; the app has no in-app updater.',text)
+        self.assertNotIn('in-app through Homebrew',text)
         for prohibited in ('postflight','preflight','system_command','xattr','zap trash','sha256 :no_check'):
             self.assertNotIn(prohibited,text)
         with self.assertRaises(ValueError):cask_text('0.17.0.1; injection',assets)
-        assets['darwin-arm64']['sha256']='bad'
+        assets['darwin-arm64']['dmg']['sha256']='bad'
         with self.assertRaises(ValueError):cask_text('0.17.0.1',assets)
 
     def test_missing_distributions_never_create_publish_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);dest=base/'release'
-            with self.assertRaises(ValueError):prepare(base,dest,'https://github.com/frankhommers/hermes-desktop-builds/actions/runs/123')
+            with self.assertRaises(ValueError):prepare(base,dest,'https://github.com/jiege6-66/hermes-desktop-builds/actions/runs/123')
             self.assertFalse(dest.exists())
             with self.assertRaises(ValueError):prepare(base,dest,'https://evil.example/run/123')
             self.assertFalse(dest.exists())

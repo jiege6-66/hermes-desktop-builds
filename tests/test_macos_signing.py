@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from common import load_pin, release_version
+from common import load_pin, release_version, dmg_name
 from release import verify_distribution
 from macos_signing import validate_signing_receipt, require_resource_seal, is_missing_seal_rejection
 from source_patches import patch_set
@@ -29,16 +29,21 @@ def fixture(directory):
     name = f'Hermes-{release_version(pin)}-darwin-arm64-adhoc.zip'
     archive = directory / name
     archive.write_bytes(b'unit-test-only: not an installable archive')
+    image = directory / dmg_name(release_version(pin), 'arm64')
+    image.write_bytes(b'unit-test-only: not a mountable image')
+    tree = '1' * 40
     manifest = {
         'platform': 'darwin', 'arch': 'arm64', 'upstream': pin,
-        'version': release_version(pin), 'sourceClean': False, 'sourceVerified': True, 'archiveRoundtrip': True,
+        'version': release_version(pin), 'sourceClean': True, 'sourceVerified': True, 'archiveRoundtrip': True,
         'sourcePatch': {'schema': 1, 'verified': True, 'upstreamCommit': pin['commit'],
-                        'upstreamTree': '1' * 40, 'patchedTree': '2' * 40, **patch_set()},
+                        'upstreamTree': tree, 'patchedTree': tree, **patch_set()},
         'archive': name, 'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
         'bytes': archive.stat().st_size, 'targetedSuite': {'releaseGatePassed': True},
+        'dmg': {'name': image.name, 'sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+                'bytes': image.stat().st_size},
         'nativeSmoke': {
             'platform': 'darwin', 'arch': 'arm64', 'firstRun': True, 'remoteForm': True,
-            'remoteSetupDirect': True, 'localInstallOfferAbsent': True,
+            'remoteSetupOpened': True, 'installOfferShown': True,
             'unreachableRemoteBlocksApply': True, 'noAgentCheckout': True,
             'errors': [], 'localInstallStarted': False,
             'ptyResult': {'exitCode': 0, 'output': 'HERMES_NATIVE_PTY_OK'},
@@ -54,12 +59,13 @@ class MacReleaseRegressionTests(unittest.TestCase):
             pin, valid = fixture(directory)
             valid['macSigning'] = valid_receipt()
             changes = [
-                lambda m: m.update(sourceClean=True),
+                lambda m: m.update(sourceClean=False),
                 lambda m: m.update(sourceVerified=1),
                 lambda m: m.pop('sourcePatch'),
                 lambda m: m['sourcePatch'].update(manifestSha256='0' * 64),
-                lambda m: m['nativeSmoke'].update(remoteSetupDirect=False),
-                lambda m: m['nativeSmoke'].update(localInstallOfferAbsent=1),
+                lambda m: m['nativeSmoke'].update(remoteSetupOpened=False),
+                lambda m: m['nativeSmoke'].update(installOfferShown=1),
+                lambda m: m['dmg'].update(sha256='0' * 64),
             ]
             for change in changes:
                 manifest = copy.deepcopy(valid)
