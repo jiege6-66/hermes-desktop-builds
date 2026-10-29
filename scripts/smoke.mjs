@@ -13,8 +13,9 @@ assert.equal(fs.existsSync(path.join(home,'.hermes')),false,'Smoke HOME must be 
 const env={...process.env};
 env.PATH=process.platform==='win32'?path.join(env.SystemRoot||env.SYSTEMROOT||'C:\\Windows','System32'):'/usr/bin:/bin:/usr/sbin:/sbin';
 const args=['--user-data-dir='+path.join(home,'u'),'--enable-logging=stderr'];
-// Linux CI only: no host kernel/security changes; never Mac/Windows install advice.
-if(process.platform==='linux'){delete env.DISPLAY;delete env.XAUTHORITY;args.push('--disable-gpu','--no-sandbox','--ozone-platform=headless');}
+// Linux CI: run under xvfb when available; the headless ozone path segfaults on
+// Electron 44 in hosted runners, so it is only a fallback without a display.
+if(process.platform==='linux'&&process.env.HERMES_SMOKE_HEADLESS==='1'){delete env.DISPLAY;delete env.XAUTHORITY;args.push('--disable-gpu','--no-sandbox','--ozone-platform=headless');}
 const errors=[];
 let app;
 try {

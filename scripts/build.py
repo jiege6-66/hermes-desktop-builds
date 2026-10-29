@@ -96,6 +96,14 @@ def main():
     # among the arguments the wrapper admits.
     pack=WORK/'packed'
     staged_count=0
+    if target=='darwin':
+        # Upstream's prepared packaging reuses the already-built dist tree, so sign
+        # its native payloads here — BEFORE packaging hashes them into the ASAR.
+        env['DESKTOP_BUILD_PYTHON']=str(sys.executable)
+        cmd('mac-stage-sign',[sys.executable,str(ROOT/'scripts/macos_signing.py'),'--stage',str(desktop),
+                              '--arch',arch,'--logs',str(logs)])
+        staged_count=json.loads((logs/'mac-staged-native-count.json').read_text())['count']
+        env.pop('DESKTOP_BUILD_PYTHON',None)
     packargs=[{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never',
               '-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]
     cmd('electron-builder',npm+['run','builder','--']+packargs,desktop)
@@ -124,9 +132,9 @@ def main():
         info=plistlib.loads((bundle/'Contents/Info.plist').read_bytes())
         if info['CFBundleExecutable']!='Hermes' or info['CFBundleIdentifier']!='com.nousresearch.hermes':raise RuntimeError('Wrong Mac bundle identity')
         cmd('mac-final-sign',[node,str(ROOT/'scripts/sign-macos.mjs'),str(src),str(bundle)],desktop)
-        # Native payloads inside app.asar.unpacked are signed by upstream's own
-        # prepared-packaging stage; verify every one of them here.
-        staged_count=verify_bundle(bundle,arch,cmd,'mac-bundle-verify')
+        # Payload natives were signed before packaging; confirm the packaged bytes
+        # still verify and that packaging did not drop or add any of them.
+        if verify_bundle(bundle,arch,cmd,'mac-bundle-verify')!=staged_count:raise RuntimeError('Mac native signing count mismatch')
     natives=native_inventory(bundle,target,arch)
     (logs/'native-binaries.json').write_text(json.dumps(natives,indent=2)+'\n')
     cmd('inspect',[node,str(ROOT/'scripts/inspect.mjs'),str(src),str(resources),target,arch,str(logs)],ROOT)
@@ -166,6 +174,14 @@ def main():
         smoke_env.update({name:short_tmp for name in ('TMPDIR','TMP','TEMP')})
         print('Private short Linux smoke temp:',short_tmp,flush=True)
     command=[node,str(ROOT/'scripts/smoke.mjs'),str(src),str(binary),str(WORK/'smoke/h'),str(logs)]
+    if target=='linux':
+        # Electron 44 segfaults on hosted runners with --ozone-platform=headless;
+        # a disposable X server is the reliable path. Headless is only a fallback.
+        xvfb=shutil.which('xvfb-run')
+        if xvfb:
+            command=[xvfb,'-a','-s','-screen 0 1280x1024x24']+command
+        else:
+            smoke_env['HERMES_SMOKE_HEADLESS']='1'
     if target=='linux' and shutil.which('strace'):
         command=[shutil.which('strace'),'-f','-e','trace=process,network,%file','-s','200','-o',str(logs/'native-strace.log')]+command
     try:
