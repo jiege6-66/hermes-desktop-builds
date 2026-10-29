@@ -210,14 +210,19 @@ def main():
         # never creates the socket and the test fails as ENOENT on chmod,
         # EADDRINUSE or a 30s timeout. Give the suite a short private temp root.
         if os.environ.get('GITHUB_ACTIONS')=='true':
-            suite_tmp=tempfile.mkdtemp(prefix='hv-',dir=os.environ['RUNNER_TEMP'])
+            # Upstream's SSH control-socket budget is byte-exact:
+            #   len($HOME/.hermes<suffix>/desktop-ssh) + 1 + 38 <= 104
+            # (38 covers '<16 hex>.sock.<16 hex>'). $HOME must therefore stay
+            # <= 35 bytes, which RUNNER_TEMP cannot do: GitHub's doubled path
+            # already spends 24 on it. Put the isolated root straight under /tmp.
+            suite_tmp=Path(tempfile.mkdtemp(prefix='hv-',dir='/tmp'))
+            short_home=suite_tmp
+            ssh_root=short_home/'.hermesmagic-test/desktop-ssh'
+            if len(str(ssh_root))+39>104:
+                raise RuntimeError(f'Isolated HOME too long for the SSH socket budget: {short_home}')
             for name in ('TMPDIR','TMP','TEMP'):
-                env[name]=suite_tmp
-            # The doubled checkout also makes $HOME long enough that upstream's
-            # SSH control-socket root trips the same sun_path limit, so its own
-            # test observes the /tmp/hermes-ssh-<uid> fallback instead of the
-            # documented default. Keep the isolation, make it short.
-            short_home=Path(suite_tmp)/'home'
+                env[name]=str(suite_tmp)
+            # Keep the isolation, keep it short.
             for extra in (short_home/'AppData/Roaming', short_home/'AppData/Local', short_home/'.cache'):
                 extra.mkdir(parents=True,exist_ok=True)
             env.update({'HOME':str(short_home),'USERPROFILE':str(short_home),
