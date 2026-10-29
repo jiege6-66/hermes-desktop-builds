@@ -1,149 +1,198 @@
-# Hermes Desktop Builds (personal fork)
+<div align="center">
+
+# Hermes Desktop Builds
+
+**The official Hermes desktop, repackaged as installable native apps** — macOS · Windows · Linux
+
+[![Build][badge-build]][link-build]
+[![Latest release][badge-release]][link-release]
+[![License][badge-license]][link-license]
+[![Platform][badge-platform]][link-release]
 
 [简体中文](README.md) · English
 
-Reproducible native builds of the **real Nous Research Hermes Electron Desktop**, taken from a
-pinned official release of [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent)
-and packaged for macOS (arm64/x64), Windows x64 and Linux x64.
+</div>
 
-This fork of [`frankhommers/hermes-desktop-builds`](https://github.com/frankhommers/hermes-desktop-builds)
-drops the three community source patches the original repository maintained, so the pipeline ships
-the **pristine upstream tree** and does not need patch rebasing on every upstream change. It is a
-build/distribution repository, not a Hermes fork and not an official Nous Research release.
+---
 
-## What changed from the upstream community repo
+**Hermes Desktop Builds** is a personal build/distribution repo: it takes a **published official
+release** of [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent), builds it on
+four native runners, signs and verifies it, and ships installable macOS, Windows and Linux packages.
 
-| Area | This fork |
-|---|---|
-| Source patches | None. `patches/manifest.json` is an explicit empty set and the build verifies the tree stays pristine (`sourceClean: true`). |
-| Version source | Upstream release trees carry a `0.0.0` placeholder; the release tag is authoritative. The pin's version is `vX.Y.Z` → `X.Y.Z`, stamped into the packaged app via `-c.extraMetadata.version`, which is what the app reports. |
-| First run | Stock upstream behavior: local install and **Connect to existing Hermes** are both offered; the remote form is one click away. |
-| In-app updater | None. Updates arrive only through release artifacts / the generated cask. |
-| macOS artifacts | `-adhoc.zip` (byte-verified archive) **and** `-adhoc.dmg` (mountable installer image with an `Applications` shortcut). |
-| Identity | Repository `jiege6-66/hermes-desktop-builds`; the daily updater, release publisher and generated cask all point here. |
+- 🔒 **Pristine upstream code** — no source patches; the build proves the tree matches the pin exactly
+- 🔄 **Follows official releases daily** — new upstream release → new pin, build, verify, publish
+- 🧾 **Every artifact is auditable** — `SHA256SUMS`, build receipts and per-target evidence ship with each release
 
-## How it follows official releases
+> Not a Hermes fork, not an official Nous Research release, and not signed by Apple or Microsoft as a publisher.
 
-`.github/workflows/update-upstream.yml` runs daily (03:17 UTC) and on demand:
+## Contents
 
-1. Read-only discovery of the latest **published, non-prerelease** release of
-   `NousResearch/hermes-agent` (never the moving `main` branch).
-2. Resolve the tag to an exact commit and verify ancestry, so a source downgrade is refused.
-3. Derive the app version: a real `apps/desktop/package.json` version wins; the `0.0.0` placeholder
-   falls back to the release tag. Anything else fails closed.
-4. Fast-forward only `upstream.json`, then explicitly dispatch the native build at the expected
-   build-repository commit. A write race stops the update.
+- [Download & install](#download--install)
+- [What this is](#what-this-is)
+- [What changed from the upstream community repo](#what-changed-from-the-upstream-community-repo)
+- [Following official releases](#following-official-releases)
+- [Pipeline internals](#pipeline-internals)
+- [Current state](#current-state)
+- [Build locally](#build-locally)
+- [Repository layout](#repository-layout)
+- [FAQ](#faq)
 
-`build.yml` builds all four native targets and only uploads artifacts if every gate passes.
-`release.yml` then verifies the build receipt, all four manifests, archive/DMG hashes and the
-uploaded asset digests before publishing a numbered release. A failed run leaves the previous
-release untouched; the pin is retained so the next daily check can retry.
+## Download & install
 
-Version numbering: the downstream release is `<upstream version>.<revision>`, e.g. upstream
-`v0.22.5` → first build `0.22.5.1`. Revisions only increase.
+Grab the file for your platform from [**Releases**][link-release]:
 
-## Pipeline details worth knowing
+| Platform | File | Install |
+| :--- | :--- | :--- |
+| macOS (Apple Silicon) | `Hermes-<version>-darwin-arm64-adhoc.dmg` | Open the DMG, drag `Hermes.app` into `Applications` |
+| macOS (Intel) | `Hermes-<version>-darwin-x64-adhoc.dmg` | Same |
+| Windows x64 | `Hermes-<version>-win32-x64-unsigned.zip` | Extract the whole ZIP, run `Hermes\Hermes.exe` |
+| Linux x64 | `Hermes-<version>-linux-x64-unsigned.tar.gz` | Extract, run `./Hermes/Hermes` in a graphical session |
 
-Each of these came out of adapting to the current upstream (Electron 44, electron-builder 27,
-`@electron/osx-sign` 2.x):
+Each release also carries `SHA256SUMS`, the exact source pin, per-target evidence ZIPs and a generated
+`hermes-desktop.rb` (Homebrew cask — no tap is maintained here, so
+`brew install --cask ./hermes-desktop.rb` after downloading it).
 
-- **Packaging goes through upstream's own prepared-packaging entry point** (`npm run builder -- …`).
-  Calling electron-builder directly makes it OOM on this monorepo while resolving npm-workspace
-  dependencies (4 GiB fails fast, 16 GiB takes the runner down). Upstream's wrapper prepares
-  isolated inputs first and stays small.
-- **macOS signing order**: prepared packaging re-stages its own native payload over `dist`, so after
-  packaging every Mach-O under `app.asar.unpacked` is ad-hoc signed
-  (`scripts/macos_signing.py --payload`) before the bundle is sealed; each native is then verified
-  with `codesign --verify` and counted.
-- **ASAR checks**: signed unpacked entries are larger than the size recorded in the ASAR header, so
-  `inspect.mjs` enforces size/integrity only for packed entries; unpacked ones are covered by the
-  code signature instead.
-- **Linux smoke**: Electron 44 segfaults on hosted runners with `--ozone-platform=headless`, so the
-  smoke runs under `xvfb-run`; headless is only a fallback when xvfb is unavailable.
-- **Upstream test defects**: on the pristine `v0.22.5` tree three upstream tests fail
-  (a `stage-native-deps` HUD warning text and two `voice-prefs` localStorage spies). They are listed
-  in `scripts/common.py` as `UPSTREAM_TEST_DEFECTS`, bound to the exact commit, file and test name,
-  with reasons. Any other failure still blocks the release.
+<details>
+<summary><b>macOS says “unidentified developer” — what now?</b></summary>
 
-## Downloads and installation
+<br/>
 
-Use [Releases](https://github.com/jiege6-66/hermes-desktop-builds/releases). Every release carries
-`SHA256SUMS`, the exact source pin, per-target evidence ZIPs and a generated `hermes-desktop.rb`
-cask. No tap is maintained for this fork, so download the cask and run
-`brew install --cask ./hermes-desktop.rb`, or install by hand.
+The build is **ad-hoc signed**: no Developer ID, no Apple notarization, so Gatekeeper will block it.
+After verifying `SHA256SUMS`, allow it once via **System Settings → Privacy & Security → Open Anyway**.
+Do **not** disable Gatekeeper/SIP or strip quarantine globally.
 
-### macOS
-
-1. Download `Hermes-<version>-darwin-<arch>-adhoc.dmg` (or the ZIP) and verify it against `SHA256SUMS`.
-2. Open the DMG and drag `Hermes.app` into `Applications`.
-3. The build is **ad-hoc signed**, not Developer ID signed or notarized. Gatekeeper will warn; after
-   verifying the checksum, use **System Settings → Privacy & Security → Open Anyway** once. Never
-   disable Gatekeeper/SIP or strip quarantine globally.
-4. Diagnose a suspect bundle instead of re-signing it:
+Diagnose a suspect bundle instead of re-signing it:
 
 ```sh
 APP="/Applications/Hermes.app"
-codesign --verify --deep --strict --verbose=2 "$APP"
-spctl --assess --type execute -vv "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"   # must pass
+spctl --assess --type execute -vv "$APP"               # still rejects an unnotarized ad-hoc publisher
 ```
 
-`codesign` must pass; `spctl` still rejects the unnotarized ad-hoc publisher — that is publisher
-trust, not a damaged bundle. A warning-free install requires an Apple Developer Program membership
-(Developer ID Application, plus Installer for a `.pkg`) and notarization credentials in a separate
-release lane, which this fork does not use.
+`codesign` passing while `spctl` rejects means **the bundle is fine, it just has no publisher trust**.
+A warning-free install needs Apple Developer Program membership (Developer ID Application, plus
+Installer for a `.pkg`) and notarization credentials in a separate release lane, which this repo
+does not use.
 
-ZIP installation, if preferred: verify the checksum, then `ditto -x -k <zip> "$HOME/Applications"`.
+</details>
 
-### Windows
+## What this is
 
-Check `Get-FileHash -Algorithm SHA256`, extract the whole ZIP into a new directory and run
-`Hermes/Hermes.exe`. The build is unsigned (no Authenticode): SmartScreen will warn, and
-organizational policy should not be bypassed.
+| | |
+| :--- | :--- |
+| **What it packages** | The official Hermes Electron desktop (real UI, real native modules, Electron runtime) |
+| **What it does not** | Python runtime, agent checkout, venv, credentials, personal backend URLs |
+| **Build environment** | GitHub-hosted runners; build jobs hold `contents: read` only, no signing keys or API tokens |
+| **Release gate** | All four platforms must pass; any failure keeps the previous release and retains the pin |
 
-### Linux
+## What changed from the upstream community repo
 
-`sha256sum` the tarball, `tar -xzf` it into a new directory and run `./Hermes/Hermes` from a
-graphical session. System Electron/Chromium libraries are required; the tarball registers no
-launcher.
+Forked from [`frankhommers/hermes-desktop-builds`](https://github.com/frankhommers/hermes-desktop-builds):
 
-## Scope and guarantees
+| Area | This repo |
+| :--- | :--- |
+| Source patches | **None.** `patches/manifest.json` is an explicit empty set; the build proves the tree stays pristine |
+| Version source | Upstream trees ship `0.0.0`; the real version comes from the release tag (`vX.Y.Z` → `X.Y.Z`) |
+| First run | Stock upstream: both “install locally” and “Connect to existing Hermes” are offered |
+| In-app updater | **None.** Updates arrive only through release artifacts / the generated cask |
+| macOS artifacts | `-adhoc.zip` (byte-exact verification copy) **and** `-adhoc.dmg` (drag-to-install) |
 
-- Each build packages Electron, the real UI and real native modules. No Python runtime, agent
-  checkout, venv, credentials or personal backend URL is bundled.
-- Builds run on standard GitHub-hosted runners with `contents: read` only; no signing or API secrets
-  are available to the build.
-- Gates: unit/tooling tests, typecheck, targeted first-run/packaging suites on every host, the full
-  upstream suite on Linux, ASAR file/integrity/secret-pattern scans, compiled-JS syntax, archive
-  CRC/roundtrip byte comparison, a real launch of the extracted distribution, native PTY execution,
-  and — on macOS — deep/strict signature verification plus negative seal/tamper tests and a
-  mount-and-compare check of the DMG.
-- Unknown test failures block the release. There is no "make CI pass" fallback and no automatic
-  dependency bumping.
+## Following official releases
 
-Limitations are recorded per release: ad-hoc signing, no notarization, no live remote login/chat
-exercised, no microphone/camera/screen permission tests, and Mac/Windows GUI integration that still
-needs a real machine.
+`.github/workflows/update-upstream.yml` runs daily at 03:17 UTC:
+
+```text
+1. discover   latest *published* release of NousResearch/hermes-agent (never main)
+2. resolve    tag → exact commit, verify ancestry, refuse any source downgrade
+3. version    real version wins; 0.0.0 placeholder falls back to the tag; anything else fails closed
+4. pin        fast-forward upstream.json only, then dispatch the native build explicitly
+```
+
+Downstream version = `<upstream version>.<revision>`, revisions only increase:
+
+```text
+upstream v0.22.5  →  first build 0.22.5.1  →  rebuild 0.22.5.2
+```
+
+## Pipeline internals
+
+Things that had to be solved for the current upstream (Electron 44, electron-builder 27,
+`@electron/osx-sign` 2.x):
+
+<details>
+<summary><b>Packaging must go through upstream's prepared-packaging entry point</b></summary>
+
+<br/>
+
+Calling electron-builder directly makes it OOM on this monorepo while resolving npm-workspace
+dependencies (4 GiB fails fast, 16 GiB takes the runner down). Upstream's wrapper prepares isolated
+inputs first and stays small:
+
+```sh
+npm run builder -- --linux --dir --x64 --publish never \
+  -c.extraMetadata.version=<version> -c.directories.output=<out>
+```
+
+</details>
+
+<details>
+<summary><b>macOS signing order</b></summary>
+
+<br/>
+
+Prepared packaging re-stages its own native payload over `dist`, so the order must be:
+
+1. after packaging, ad-hoc sign every Mach-O under `app.asar.unpacked`;
+2. then seal the whole `Hermes.app`;
+3. verify each native with `codesign --verify`, compare counts, and run the negative seal/tamper tests.
+
+Signing happens after the ASAR is written, so unpacked entries end up larger than the size recorded in
+the ASAR header — those entries are covered by the **code signature**, and `inspect.mjs` only enforces
+size/integrity for packed entries.
+
+</details>
+
+<details>
+<summary><b>Linux smoke needs xvfb</b></summary>
+
+<br/>
+
+Electron 44 segfaults on hosted runners with `--ozone-platform=headless`, so the smoke runs under
+`xvfb-run -a -s '-screen 0 1280x1024x24'`; headless is only a fallback when xvfb is unavailable.
+
+</details>
+
+<details>
+<summary><b>Three upstream test defects are recorded as exceptions</b></summary>
+
+<br/>
+
+On the pristine `v0.22.5` tree three upstream tests fail (a `stage-native-deps` HUD warning text and
+two `voice-prefs` localStorage spies). They are listed in `scripts/common.py` as
+`UPSTREAM_TEST_DEFECTS`, bound to the exact commit, file and test name, with reasons. **Any other
+failure still blocks the release.**
+
+</details>
 
 ## Current state
 
-- **The updater is fixed and verified**: it recognizes the `0.0.0` placeholder and takes the release
-  tag as the version; the pin advanced to `v0.22.5` (downstream `0.22.5.1`) and the commit/push/
-  dispatch chain of `apply` has been exercised for real.
-- **Native builds are still being stabilized**: the packaging OOM, macOS signing order, ASAR checks
-  and the Linux smoke path are fixed one by one; remaining stages are being verified in CI. While a
-  run is not green, no release is published and the previous one stays available.
-- Check progress:
+| Stage | Status |
+| :--- | :--- |
+| Version following (placeholder → tag version) | ✅ Fixed: pin advanced to `v0.22.5` → downstream `0.22.5.1` |
+| Daily updater commit / push / dispatch | ✅ Exercised for real |
+| Four-platform native builds | 🚧 Converging: packaging OOM, macOS signing, ASAR checks and Linux smoke are fixed; remaining stages are still being verified in CI |
+
+While a run is not green, no release is published and the previous one stays available. Check progress:
 
 ```sh
 gh run list --repo jiege6-66/hermes-desktop-builds --limit 5
 gh run view <run-id> --repo jiege6-66/hermes-desktop-builds --log-failed
 ```
 
-## Reproduce locally
+## Build locally
 
-`upstream.json` pins the exact upstream commit, version, revision and Node version. Use a fresh
-checkout on the target OS with Git, that Node version and Python ≥ 3.11 (Linux also needs a basic
-toolchain such as `make`/`gcc`):
+`upstream.json` pins the upstream commit, version, revision and Node version. Use a fresh checkout with
+Git, that Node version and Python ≥ 3.11 (Linux also needs `make`/`gcc`):
 
 ```sh
 python3 -m unittest discover -s tests -v
@@ -151,28 +200,94 @@ node --test tests/asar-paths.test.mjs tests/macos-signing.test.mjs
 python3 scripts/build.py --run        # builds this host only; writes out/
 ```
 
-The build fetches the exact public commit, refuses to reuse `.work/src`, verifies the (empty) patch
-set against its hash-pinned manifest, runs lockfile `npm ci` with lifecycle scripts disabled,
-installs Electron explicitly, then uses upstream build/staging/builder hooks. Caches and test homes
-stay under `.work/`; outputs stay under `out/`. The Linux desktop smoke needs an X server; install
-`xvfb` locally if the machine has none.
+<details>
+<summary><b>What the build actually does</b></summary>
 
-Manual recovery: `gh workflow run build.yml --ref main`, then
-`python3 scripts/ci_receipt.py --run <run-id>` and `python3 scripts/release.py --downloads …`.
+<br/>
 
-## Files
+Fetch the exact public commit (refusing to reuse `.work/src`) → verify the patch-set hashes (empty
+here) → `npm ci` with lifecycle scripts disabled → install Electron explicitly → run upstream's
+build/staging/packaging hooks → sign (macOS only) → ASAR and install-stamp inspection → package →
+unpack and compare byte-for-byte → launch the real app as a smoke test → full test gate.
 
-- `upstream.json` — source pin (repository, commit, version, revision, Node).
-- `patches/manifest.json` — explicit patch set (empty here) with hashes.
-- `scripts/update_upstream.py` — discovery/plan/apply for the daily pin.
-- `scripts/build.py` — native fetch, verification, packaging (ZIP + DMG), smoke launch.
-- `scripts/inspect.mjs`, `scripts/smoke.mjs` — ASAR/stamp inspection and the real app launch.
-- `scripts/macos_signing.py`, `scripts/sign-macos.mjs` — Mac payload and bundle signing/verification.
-- `scripts/release.py`, `scripts/ci_receipt.py` — verified-only publication.
-- `mainstream/` — unused one-time installer path inherited from the original repository; not
-  exercised by this fork's workflows.
+Caches and test homes stay under `.work/`; outputs under `out/`. The Linux desktop smoke needs an X
+server — install `xvfb` locally if the machine has none.
+
+</details>
+
+<details>
+<summary><b>Recover a release manually</b></summary>
+
+<br/>
+
+```sh
+gh workflow run build.yml --ref main
+python3 scripts/ci_receipt.py --run <run-id>
+python3 scripts/release.py --downloads out/downloads --destination out/release \
+  --run-url https://github.com/jiege6-66/hermes-desktop-builds/actions/runs/<run-id>
+```
+
+</details>
+
+## Repository layout
+
+```text
+.
+├── upstream.json                  # source pin: repo / commit / version / revision / Node
+├── patches/manifest.json          # explicit patch set (empty here) with hashes
+├── scripts/
+│   ├── update_upstream.py         # daily discovery → plan → apply
+│   ├── build.py                   # fetch, verify, package (ZIP + DMG), smoke launch
+│   ├── inspect.mjs / smoke.mjs    # ASAR + install-stamp inspection, real app launch
+│   ├── macos_signing.py           # Mac payload / bundle signing and verification
+│   └── release.py / ci_receipt.py # verified-only publication
+└── .github/workflows/             # update, build and publish pipelines
+```
+
+## FAQ
+
+<details>
+<summary><b>Why does the version look like <code>0.22.5.1</code>?</b></summary>
+
+<br/>
+
+The first three parts come from the upstream release tag; the fourth is this repo's packaging
+revision. Rebuilds of the same upstream release increment it, and it never decreases.
+
+</details>
+
+<details>
+<summary><b>Why is there no in-app updater?</b></summary>
+
+<br/>
+
+The original repo shipped a macOS updater bound to its author's Homebrew tap. This fork drops it:
+updates come from Releases only, so nothing depends on somebody else's tap. If you want Homebrew to
+manage it, use the cask generated in each release.
+
+</details>
+
+<details>
+<summary><b>Why is the pipeline this strict?</b></summary>
+
+<br/>
+
+The rule is “fail rather than ship something suspicious”: unknown test failures, signature failures and
+hash mismatches abort the release instead of being marked green — the only exceptions are the three
+upstream test defects listed above.
+
+</details>
 
 ## Disclaimer
 
-A personal community build: not an official Nous Research release, and not signed by Apple or
-Microsoft as a publisher. Verify checksums and follow your own environment's security policy.
+A personal community build: not an official Nous Research release, and not signed by Apple or Microsoft
+as a publisher. Verify checksums and follow your own environment's security policy. Source follows the
+upstream MIT license.
+
+[badge-build]: https://github.com/jiege6-66/hermes-desktop-builds/actions/workflows/build.yml/badge.svg
+[link-build]: https://github.com/jiege6-66/hermes-desktop-builds/actions/workflows/build.yml
+[badge-release]: https://img.shields.io/github/v/release/jiege6-66/hermes-desktop-builds?display_name=tag&sort=semver&color=blue
+[link-release]: https://github.com/jiege6-66/hermes-desktop-builds/releases
+[badge-license]: https://img.shields.io/badge/license-MIT-green
+[link-license]: ./LICENSE
+[badge-platform]: https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey
