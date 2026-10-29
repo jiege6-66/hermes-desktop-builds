@@ -1,61 +1,71 @@
-# Hermes Desktop Builds (personal fork)
+# Hermes 桌面端构建（个人 fork）
 
-Reproducible native builds of the **real Nous Research Hermes Electron Desktop**,
-taken from a pinned official release of [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent)
-and packaged for macOS (arm64/x64), Windows x64 and Linux x64.
+简体中文 · [English](README.en.md)
 
-This fork of [`frankhommers/hermes-desktop-builds`](https://github.com/frankhommers/hermes-desktop-builds)
-drops the three community source patches the original repository maintained, so the
-pipeline ships the **pristine upstream tree** and does not need patch rebasing on every
-upstream change. It is a build/distribution repository, not a Hermes fork and not an
-official Nous Research release.
+基于官方 [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent) 的固定发布版本，
+重新打包**真正的 Hermes Electron 桌面端**，产出 macOS（arm64 / x64）、Windows x64、Linux x64 四个原生包。
 
-## What changed from the upstream community repo
+本仓库 fork 自 [`frankhommers/hermes-desktop-builds`](https://github.com/frankhommers/hermes-desktop-builds)，
+**去掉了原仓库维护的三个社区源码补丁**，因此构建的是**原样的上游代码树**，不需要在每次上游更新后
+重做补丁适配。它是构建 / 分发仓库，不是 Hermes 的分支，也不是 Nous Research 官方发布。
 
-| Area | This fork |
+## 与原仓库的差异
+
+| 方面 | 本 fork |
 |---|---|
-| Source patches | None. `patches/manifest.json` is an explicit empty set and the build verifies the tree stays pristine (`sourceClean: true`). |
-| Version source | Upstream trees carry a `0.0.0` placeholder; the release tag is authoritative. The pin's version is `vX.Y.Z` → `X.Y.Z`, and the packaged app is stamped with it via `-c.extraMetadata.version`. |
-| First run | Stock upstream behavior: local install and **Connect to existing Hermes** are both offered; the remote form is one click away. |
-| In-app updater | None. Updates arrive only through release artifacts / the generated cask. |
-| macOS artifacts | `-adhoc.zip` (byte-verified archive) **and** `-adhoc.dmg` (mountable installer image with an `Applications` shortcut). |
-| Identity | Repository `jiege6-66/hermes-desktop-builds`; the daily updater, release publisher and generated cask all point here. |
+| 源码补丁 | 无。`patches/manifest.json` 是显式空集，构建会验证源码树保持原样（`sourceClean: true`）。 |
+| 版本来源 | 上游发布树里 `apps/desktop/package.json` 固定是占位符 `0.0.0`，真实版本由发布 tag 决定：`vX.Y.Z` → `X.Y.Z`，打包时用 `-c.extraMetadata.version` 注入，应用内显示的就是这个版本。 |
+| 首次启动 | 保持上游原生行为：同时提供“本地安装”和“Connect to existing Hermes”，远程表单一次点击即可进入（不再默认直达、也不再隐藏本地安装入口）。 |
+| 应用内更新 | 没有。更新只通过 Release 产物 / 生成的 cask 完成。 |
+| macOS 产物 | `-adhoc.zip`（逐字节校验用）**和** `-adhoc.dmg`（可挂载、含 `Applications` 快捷方式）。 |
+| 仓库标识 | `jiege6-66/hermes-desktop-builds`；每日更新器、发布流程、生成的 cask 都指向这里。 |
 
-## How it follows official releases
+## 如何跟随官方更新
 
-`.github/workflows/update-upstream.yml` runs daily (03:17 UTC) and on demand:
+`.github/workflows/update-upstream.yml` 每天 03:17 UTC 以及手动触发时运行：
 
-1. Read-only discovery of the latest **published, non-prerelease** release of
-   `NousResearch/hermes-agent` (never the moving `main` branch).
-2. Resolve the tag to an exact commit and verify ancestry, so a source downgrade is refused.
-3. Derive the app version: a real `apps/desktop/package.json` version wins; the `0.0.0`
-   placeholder falls back to the release tag. Anything else fails closed.
-4. Fast-forward only `upstream.json`, then explicitly dispatch the native build at the
-   expected build-repository commit. A write race stops the update.
+1. **只读**发现 `NousResearch/hermes-agent` 最新的正式（非 draft、非 prerelease）发布，不跟随 `main`。
+2. 把 tag 解析成确切 commit 并校验祖先关系，杜绝源码版本倒退。
+3. 推导应用版本：`package.json` 里是真实版本就优先用它；是 `0.0.0` 占位符则改用发布 tag；其他异常值一律拒绝。
+4. 只快进 `upstream.json`，随后显式派发原生构建，并校验构建仓库提交未变；写入竞争会中止更新。
 
-`build.yml` builds all four native targets and only uploads artifacts if every gate passes.
-`release.yml` then verifies the build receipt, all four manifests, archive/DMG hashes and the
-uploaded asset digests before publishing a numbered release. A failed run leaves the previous
-release untouched; the pin is retained so the next daily check can retry.
+`build.yml` 在四条原生流水线全部通过后才上传产物；`release.yml` 再校验构建回执、四份 manifest、
+ZIP/DMG 哈希和上传资产摘要，才发布带版本号的 Release。任何一步失败都不会动上一版，pin 会保留，
+下一次每日检查可以重试。
 
-Version numbering: the downstream release is `<upstream version>.<revision>`, e.g. upstream
-`v0.22.5` → first build `0.22.5.1`. Revisions only increase.
+版本号规则：下游版本 = `<上游版本>.<修订号>`，例如上游 `v0.22.5` → 首次构建 `0.22.5.1`，修订号只增不减。
 
-## Downloads and installation
+## 构建流水线的几个关键点
 
-Use [Releases](https://github.com/jiege6-66/hermes-desktop-builds/releases). Every release
-carries `SHA256SUMS`, the exact source pin, per-target evidence ZIPs and a generated
-`hermes-desktop.rb` cask. No tap is maintained for this fork, so install by hand or with
-`brew install --cask ./hermes-desktop.rb` after downloading the cask file.
+下面几处都是适配当前上游（Electron 44、electron-builder 27、`@electron/osx-sign` 2.x）时踩出来的：
+
+- **打包走上游自己的 prepared packaging 入口**（`npm run builder -- …`）。直接调 electron-builder 会在这个
+  monorepo 上因 npm workspace 依赖扫描而内存爆炸（4 GiB 快速 OOM，16 GiB 会把 runner 拖死）；上游 wrapper
+  会先准备隔离输入再调用 electron-builder，内存稳定。
+- **macOS 签名顺序**：prepared packaging 会用它自己暂存的 native 覆盖 `dist`，所以打包后先给
+  `app.asar.unpacked` 里的 Mach-O 逐个 ad-hoc 签名（`scripts/macos_signing.py --payload`），再给整个
+  bundle 封签；随后逐个 `codesign --verify` 并比对数量。
+- **ASAR 校验**：unpacked 条目签名后字节数会大于 asar 头部记录的尺寸，`inspect.mjs` 因此只对 packed 条目
+  做尺寸/完整性校验，unpacked 条目由代码签名担保。
+- **Linux 冒烟**：Electron 44 在 runner 上用 `--ozone-platform=headless` 会 SIGSEGV，改为 `xvfb-run`
+  起临时 X server；没有 xvfb 时才回退 headless。
+- **上游自带测试缺陷**：`v0.22.5` 这棵原样树上有三个上游测试会失败（`stage-native-deps` 的 HUD 警告文案、
+  `voice-prefs` 两处 localStorage spy）。它们按“commit + 文件 + 用例全名”登记在 `scripts/common.py` 的
+  `UPSTREAM_TEST_DEFECTS` 并附原因；其他任何失败仍然阻断发布。
+
+## 下载与安装
+
+从 [Releases](https://github.com/jiege6-66/hermes-desktop-builds/releases) 取。每个 Release 都带
+`SHA256SUMS`、源码 pin、各平台证据 ZIP 和生成的 `hermes-desktop.rb` cask。本 fork 不维护 tap，
+需要时下载 cask 后执行 `brew install --cask ./hermes-desktop.rb`。
 
 ### macOS
 
-1. Download `Hermes-<version>-darwin-<arch>-adhoc.dmg` (or the ZIP) and verify it against `SHA256SUMS`.
-2. Open the DMG and drag `Hermes.app` into `Applications`.
-3. The build is **ad-hoc signed**, not Developer ID signed or notarized. Gatekeeper will warn;
-   after verifying the checksum, use **System Settings → Privacy & Security → Open Anyway**
-   once. Never disable Gatekeeper/SIP or strip quarantine globally.
-4. Diagnose a suspect bundle instead of re-signing it:
+1. 下载 `Hermes-<版本>-darwin-<架构>-adhoc.dmg`（或 ZIP），用 `SHA256SUMS` 核对。
+2. 打开 dmg，把 `Hermes.app` 拖进“应用程序”。
+3. 包是 **ad-hoc 签名**，没有 Developer ID、也没做 Apple 公证，Gatekeeper 会拦截；核对校验和之后，
+   用“系统设置 → 隐私与安全性 → 仍要打开”手动放行一次。不要关闭 Gatekeeper/SIP，不要全局移除隔离属性。
+4. 怀疑包有问题时先诊断，不要自己重新签名：
 
 ```sh
 APP="/Applications/Hermes.app"
@@ -63,70 +73,63 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 spctl --assess --type execute -vv "$APP"
 ```
 
-`codesign` must pass; `spctl` still rejects the unnotarized ad-hoc publisher — that is
-publisher trust, not a damaged bundle. A warning-free install requires an Apple Developer
-Program membership (Developer ID Application, plus Installer for a `.pkg`) and notarization
-credentials in a separate release lane, which this fork does not use.
-
-ZIP installation, if preferred: verify the checksum, then `ditto -x -k <zip> "$HOME/Applications"`.
+`codesign` 必须通过；`spctl` 仍会拒绝未公证的 ad-hoc 发布者——那是“发布者信任”问题，不是包损坏。
+要做到双击无警告，需要 Apple Developer Program（Developer ID Application，打 pkg 还需 Installer 证书）
+并在独立通道里存公证凭据，本 fork 不使用。
 
 ### Windows
 
-Check `Get-FileHash -Algorithm SHA256`, extract the whole ZIP into a new directory and run
-`Hermes/Hermes.exe`. The build is unsigned (no Authenticode): SmartScreen will warn, and
-organizational policy should not be bypassed.
+`Get-FileHash -Algorithm SHA256` 核对后，把整个 ZIP 解压到新目录再运行 `Hermes/Hermes.exe`。
+产物无 Authenticode 签名，SmartScreen 会警告；不要为了绕过组织策略而关闭防护。
 
 ### Linux
 
-`sha256sum` the tarball, `tar -xzf` it into a new directory and run `./Hermes/Hermes` from a
-graphical session. System Electron/Chromium libraries are required; the tarball registers no
-launcher. CI launches the real renderer with `--ozone-platform=headless --no-sandbox`, which
-is a CI-only flag, not run advice.
+`sha256sum` 核对后 `tar -xzf` 解压到新目录，在图形会话里运行 `./Hermes/Hermes`。需要系统自带的
+Electron/Chromium 图形库；压缩包不会注册桌面启动器。
 
-## Scope and guarantees
+## 当前状态
 
-- Each build packages Electron, the real UI and real native modules. No Python runtime,
-  agent checkout, venv, credentials or personal backend URL is bundled.
-- Builds run on standard GitHub-hosted runners with `contents: read` only; no signing or API
-  secrets are available to the build.
-- Gates: unit/tooling tests, typecheck, targeted first-run/packaging suites on every host, the
-  full upstream suite on Linux, ASAR file/integrity/secret-pattern scans, compiled-JS syntax,
-  archive CRC/roundtrip byte comparison, a real launch of the extracted distribution, native
-  PTY execution, and — on macOS — deep/strict signature verification plus negative
-  seal/tamper tests and a mount-and-compare check of the DMG.
-- Unknown test failures block the release. There is no "make CI pass" fallback and no
-  automatic dependency bumping.
+- **更新器已修复并验证**：能识别 `0.0.0` 占位符并从发布 tag 取版本；pin 已推进到 `v0.22.5`
+  （下游 `0.22.5.1`），`apply` 的提交、推送、派发链路已实际跑通。
+- **四平台原生构建仍在稳定中**：打包 OOM、Mac 签名顺序、ASAR 校验、Linux 冒烟这几处已逐项修掉，
+  剩余环节仍在 CI 上逐轮验证。构建未全绿时不会发 Release，上一版保持可用。
+- 查看当前进展：
 
-Limitations are real and recorded per release: ad-hoc signing, no notarization, no live
-remote login/chat exercised, no microphone/camera/screen permission tests, and Mac/Windows
-GUI integration that still needs a real machine.
+```sh
+gh run list --repo jiege6-66/hermes-desktop-builds --limit 5
+gh run view <run-id> --repo jiege6-66/hermes-desktop-builds --log-failed
+```
 
-## Reproduce locally
+## 本地复现
 
-`upstream.json` pins the exact upstream commit, version, revision and Node version. Use a
-fresh checkout on the target OS with Git, that Node version and Python ≥ 3.11:
+`upstream.json` 固定上游 commit、版本、修订号和 Node 版本。准备目标系统的干净检出，装好 Git、该版本
+Node 和 Python ≥ 3.11（Linux 还需要 `make`/`gcc` 等基础编译工具链）：
 
 ```sh
 python3 -m unittest discover -s tests -v
 node --test tests/asar-paths.test.mjs tests/macos-signing.test.mjs
-python3 scripts/build.py --run        # builds this host only; writes out/
+python3 scripts/build.py --run        # 只构建当前主机，产物写入 out/
 ```
 
-The build fetches the exact public commit, refuses to reuse `.work/src`, applies the (empty)
-patch set with a hash-pinned manifest, runs lockfile `npm ci` with lifecycle scripts disabled,
-installs Electron explicitly, then uses upstream build/staging/builder hooks. Caches and test
-homes stay under `.work/`; outputs stay under `out/`.
+构建会拉取确切的公开 commit、拒绝复用旧的 `.work/src`、按哈希校验（此 fork 为空的）补丁集、
+用 `npm ci`（先禁用生命周期脚本）安装依赖、显式安装 Electron，再走上游的构建/暂存/打包钩子。
+缓存与测试 HOME 都在 `.work/` 下，产物在 `out/` 下。Linux 桌面冒烟需要 X server，本地可先装 `xvfb`。
 
-Manual recovery: `gh workflow run build.yml --ref main`, then
-`python3 scripts/ci_receipt.py --run <run-id>` and `python3 scripts/release.py --downloads …`.
+手动恢复流程：`gh workflow run build.yml --ref main`，然后
+`python3 scripts/ci_receipt.py --run <run-id>`、`python3 scripts/release.py --downloads …`。
 
-## Files
+## 目录
 
-- `upstream.json` — source pin (repository, commit, version, revision, Node).
-- `patches/manifest.json` — explicit patch set (empty here) with hashes.
-- `scripts/update_upstream.py` — discovery/plan/apply for the daily pin.
-- `scripts/build.py` — native fetch, verification, packaging (ZIP + DMG), smoke launch.
-- `scripts/inspect.mjs`, `scripts/smoke.mjs` — ASAR/stamp inspection and the real app launch.
-- `scripts/release.py`, `scripts/ci_receipt.py` — verified-only publication.
-- `mainstream/` — unused one-time installer path inherited from the original repository;
-  not exercised by this fork's workflows.
+- `upstream.json` — 源码 pin（仓库、commit、版本、修订号、Node）。
+- `patches/manifest.json` — 显式补丁集（本 fork 为空）及其哈希。
+- `scripts/update_upstream.py` — 每日发现 / 计划 / 落地更新。
+- `scripts/build.py` — 原生拉取、校验、打包（ZIP + DMG）、启动冒烟。
+- `scripts/inspect.mjs`、`scripts/smoke.mjs` — ASAR 与安装戳检查、真实启动验证。
+- `scripts/macos_signing.py`、`scripts/sign-macos.mjs` — Mac payload 与 bundle 的签名及校验。
+- `scripts/release.py`、`scripts/ci_receipt.py` — 只允许已验证产物的发布流程。
+- `mainstream/` — 原仓库遗留的一次性安装器方案，本 fork 的 workflow 不会执行。
+
+## 免责
+
+这是个人的社区构建，不是 Nous Research 官方发布，也没有 Apple/微软的发布者签名。请自行核对校验和，
+并遵守所在环境的安全策略。
