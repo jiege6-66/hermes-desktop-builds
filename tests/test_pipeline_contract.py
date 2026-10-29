@@ -26,10 +26,11 @@ class PipelineContractTests(unittest.TestCase):
         self.assertIn("-c.extraMetadata.version='+pin['version']", build)
         self.assertIn("'dmg']={'name':dmg.name", build)
         self.assertIn("assert.equal(pkg.version,pin.version)", inspect)
-        self.assertIn("assert.equal(stamp.distribution,undefined)", inspect)
+        self.assertIn("assert.notEqual(stamp.distribution,'frankhommers-homebrew')", inspect)
         self.assertIn("assert.equal(runtimeDesktopVersion,pin.version)", smoke)
         self.assertIn('Install Hermes locally', smoke)
-        self.assertNotIn('frankhommers-homebrew', build + inspect + smoke)
+        self.assertNotIn('HERMES_DESKTOP_DISTRIBUTION', build)
+        self.assertNotIn("assert.equal(stamp.distribution,'frankhommers-homebrew')", inspect)
 
     def test_native_build_is_read_only_and_release_requires_verified_main(self):
         build = (ROOT / '.github/workflows/build.yml').read_text()

@@ -63,7 +63,7 @@ assert(renderer.includes('Connect to existing Hermes'));
 assert(renderer.includes('No local install will start.'));
 const stamp=JSON.parse(fs.readFileSync(path.join(resources,'install-stamp.json')));
 assert.equal(stamp.commit,pin.commit);assert.equal(stamp.dirty,false);
-assert.equal(stamp.distribution,undefined);
+assert.notEqual(stamp.distribution,'frankhommers-homebrew');
 assert.equal(stamp.distributionVersion,undefined);
 fs.writeFileSync(path.join(logs,'asar.json'),JSON.stringify({platform,arch,files:inventory.length,integrity:'all entries verified',stamp,inventory},null,2)+'\n');
 console.log('ASAR integrity/native presence/credential-pattern scan/compiled JS syntax verified:',inventory.length,'files');

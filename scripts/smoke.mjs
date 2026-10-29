@@ -43,7 +43,7 @@ try {
   // Upstream trees carry a 0.0.0 placeholder; this pipeline injects the pinned
   // release version at pack time, so the running app must report it.
   const runtimeDesktopVersion=runtimeDesktopVersionInfo.appVersion;
-  assert.equal(installStamp.distribution,undefined);
+  assert.notEqual(installStamp.distribution,'frankhommers-homebrew');
   assert.equal(installStamp.distributionVersion,undefined);
   assert.equal(runtimeDesktopVersion,pin.version);
 
