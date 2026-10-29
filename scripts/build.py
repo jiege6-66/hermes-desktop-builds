@@ -104,7 +104,8 @@ def main():
     pattern={'darwin':'mac*/Hermes.app','win32':'win*/Hermes.exe','linux':'linux*/Hermes'}[target]
     found=sorted(pack.glob(pattern))
     if len(found)!=1:raise RuntimeError(f'Expected exactly one packaged app, found {len(found)}')
-    original=found[0]
+    # On Windows/Linux the matched path is the executable inside the package root.
+    original=found[0] if target=='darwin' else found[0].parent
     bundle=WORK/'bundle'/(original.name if target=='darwin' else 'Hermes')
     bundle.parent.mkdir(exist_ok=True)
     shutil.move(str(original),str(bundle))
