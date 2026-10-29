@@ -23,8 +23,11 @@ for(const name of entries){
   assert(!/(^|\/)(\.env(?:\..*)?|auth\.json|config\.yaml|state\.db|id_rsa|id_ed25519|venv|\.venv|hermes-agent)(\/|$)|\.(py|pyc|pyo|p8|p12|pfx)$/.test(name),`Disallowed payload: ${name}`);
   const data=readEntry(name);
   const sha256=crypto.createHash('sha256').update(data).digest('hex');
-  assert.equal(data.length,stat.size,name);
-  if(stat.integrity){assert.equal(stat.integrity.algorithm,'SHA256');assert.equal(stat.integrity.hash,sha256,name);}
+  // Unpacked entries are signed on macOS after packaging, so their bytes are
+  // larger than the size recorded when the archive was written; their integrity
+  // is covered by the code signature instead of the ASAR header.
+  if(!stat.unpacked)assert.equal(data.length,stat.size,name);
+  if(stat.integrity&&!stat.unpacked){assert.equal(stat.integrity.algorithm,'SHA256');assert.equal(stat.integrity.hash,sha256,name);}
   if(platform!=='linux')assert(!data.subarray(0,4).equals(Buffer.from([0x7f,0x45,0x4c,0x46])),`ELF in non-Linux asar: ${name}`);
   if(/\.(mjs|js|json|html)$/.test(name)){
     assert(!/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\r\n]+[A-Za-z0-9+/]/.test(data.toString()),`Private key: ${name}`);

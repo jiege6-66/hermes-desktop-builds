@@ -26,6 +26,7 @@ class PipelineContractTests(unittest.TestCase):
         self.assertIn("-c.extraMetadata.version='+pin['version']", build)
         self.assertIn("'dmg']={'name':dmg.name", build)
         self.assertIn("assert.equal(pkg.version,pin.version)", inspect)
+        self.assertIn("if(!stat.unpacked)assert.equal(data.length,stat.size,name)", inspect)
         self.assertIn("assert.notEqual(stamp.distribution,'frankhommers-homebrew')", inspect)
         self.assertIn("assert.equal(runtimeDesktopVersion,pin.version)", smoke)
         self.assertIn('Install Hermes locally', smoke)
