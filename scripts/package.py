@@ -97,11 +97,36 @@ def make_archive(app,outfile):
                     with p.open('rb') as src,z.open(zi,'w',force_zip64=True) as dst:shutil.copyfileobj(src,dst,1024*1024)
 
 
+def _extract_tar(tar,dest):
+    """Extract with the 'data' filter, keeping the same guarantee on older Pythons.
+
+    tarfile only grew the extraction filters in 3.12; on 3.11 (a supported
+    interpreter here) extractall() has no `filter` argument, so the escape
+    checks the filter would apply are done by hand instead of dropping them.
+    """
+    try:
+        tar.extractall(dest,filter='data')
+        return
+    except TypeError:
+        pass
+    root=dest.resolve()
+    for member in tar.getmembers():
+        target=(dest/member.name).resolve()
+        if target!=root and root not in target.parents:raise ValueError('Tar member escapes destination: '+member.name)
+        if member.issym() or member.islnk():
+            if Path(member.linkname).is_absolute():raise ValueError('Absolute tar link: '+member.name)
+            link=(target.parent/member.linkname).resolve()
+            if link!=root and root not in link.parents:raise ValueError('Tar link escapes destination: '+member.name)
+        elif not (member.isfile() or member.isdir()):
+            raise ValueError('Unsupported tar member type: '+member.name)
+    tar.extractall(dest)
+
+
 def unpack_archive(archive,dest):
     if dest.exists():raise ValueError('Extraction destination already exists: '+str(dest))
     dest.mkdir(parents=True)
     if archive.name.endswith('.tar.gz'):
-        with tarfile.open(archive) as tar:tar.extractall(dest,filter='data')
+        with tarfile.open(archive) as tar:_extract_tar(tar,dest)
         return
     with zipfile.ZipFile(archive) as z:
         if z.testzip() is not None:raise ValueError('ZIP CRC failure')
