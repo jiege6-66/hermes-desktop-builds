@@ -74,3 +74,15 @@ scripts/ci_receipt.py        发布前核对 CI 回执
 输出带进异常；不再等管道 EOF。`smoke.mjs` 里每个 await 都有上限，另有 330 秒的总看门狗，超时会落一份
 `smoke-diagnostics.json`（URL、页面文本、控制台错误）。版本仍然要核对，但改成从主进程读 `app.getVersion()`，
 那条在首启阶段就能立刻返回。
+
+## Linux 上的全量测试要短路径、空磁盘和 uv
+
+冒烟通了之后，Linux 那条在收尾的全量套件（15218 项）里还有一批失败，原因是环境而不是代码：
+
+- **unix socket 路径超长**。上游的 gateway 测试把 socket 放在 `TMPDIR` 下，CI 的 checkout 路径是双份
+  `/home/runner/work/<repo>/<repo>`，`sun_path` 只有 108 字节，`listen()` 直接失败——表现出来是
+  `ENOENT ... chmod`、`EADDRINUSE` 或 30 秒超时。给全量套件单独指一个短的临时根目录即可。
+- **缺 `uv`**。`source-backend.test.ts` 里有一句 `assert uv, "real uv must be prepared on PATH"`，
+  装一个锁定版本的 `uv` 就过。
+- **磁盘写满**。套件给每个用例写临时树，而打包产物树此时已经校验完、归档完毕，删掉 `packed`/`bundle`/`dmg*`
+  腾出空间，否则会看到 `ENOSPC: no space left on device`。

@@ -197,6 +197,23 @@ def main():
     if target=='linux':
         report=logs/'vitest.json'
         env['DESKTOP_TEST_RECEIPT']=str(logs/'full-completion.json')
+        # The suite writes a temp tree per test; the packaged build trees are
+        # already archived and verified by now, so drop them to keep the runner
+        # from hitting ENOSPC mid-suite.
+        for stale in ('packed','bundle','dmg','dmg-mount'):
+            leftover=WORK/stale
+            if leftover.exists():
+                shutil.rmtree(leftover,ignore_errors=True)
+        # Upstream's gateway suites bind unix sockets under TMPDIR. On CI the
+        # checkout path is doubled (/home/runner/work/<repo>/<repo>), so a
+        # .work/tmp path can run past the 108-byte sun_path limit: listen() then
+        # never creates the socket and the test fails as ENOENT on chmod,
+        # EADDRINUSE or a 30s timeout. Give the suite a short private temp root.
+        if os.environ.get('GITHUB_ACTIONS')=='true':
+            suite_tmp=tempfile.mkdtemp(prefix='hv-',dir=os.environ['RUNNER_TEMP'])
+            for name in ('TMPDIR','TMP','TEMP'):
+                env[name]=suite_tmp
+            print('Short full-suite temp:',suite_tmp,flush=True)
         rc=cmd('upstream-full-tests',npm+['test','--','--maxWorkers=4','--reporter=default','--reporter=json','--outputFile.json='+str(report)]+reporter,desktop,True)
         data=json.loads(report.read_text());data['runCompletion']=json.loads((logs/'full-completion.json').read_text())
         gate=gate_test_report(data,pin,rc)

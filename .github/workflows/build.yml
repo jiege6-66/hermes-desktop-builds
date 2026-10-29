@@ -60,6 +60,14 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: ASAR path and signing regression tests
         run: node --test tests/asar-paths.test.mjs tests/macos-signing.test.mjs
+      - name: Test toolchain for the upstream suite
+        # Upstream's source-backend launcher test asserts a real `uv` on PATH.
+        # Pinned by version (verified on PyPI) and installed into the runner's
+        # user site so nothing is fetched by a floating tag.
+        if: matrix.platform == 'linux'
+        run: |
+          python3 -m pip install --user --disable-pip-version-check 'uv==0.13.6'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build, inspect, roundtrip, and launch native app
         run: python3 scripts/build.py --run --expected-platform ${{ matrix.platform }} --expected-arch ${{ matrix.arch }}
       - name: Verified standalone distribution and evidence
