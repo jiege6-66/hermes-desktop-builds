@@ -89,34 +89,23 @@ def main():
     (logs/'targeted-gate.json').write_text(json.dumps(targeted_gate,indent=2)+'\n')
     print('TARGETED SUITE:',json.dumps(targeted_gate),flush=True)
     cmd('build',npm+['run','build'],desktop)
-    # electron-builder 27 exposes no `./cli.js` subpath; resolve its bin entry from
-    # the installed package instead of guessing the dist layout.
-    BUILDER_BIN=("const{createRequire}=require('module');const path=require('path');const fs=require('fs');"
-                 "const r=createRequire(process.cwd()+path.sep+'package.json');"
-                 "const root=path.dirname(path.dirname(r.resolve('electron-builder')));"
-                 "const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));"
-                 "console.log(path.join(root,pkg.bin['electron-builder']))")
-    builder=subprocess.check_output([node,'-e',BUILDER_BIN],cwd=desktop,env=env,text=True).strip()
-    if not Path(builder).is_file():raise RuntimeError('Cannot locate the installed electron-builder CLI')
+    # electron-builder 27 OOMs on this monorepo while resolving npm-workspace
+    # dependencies (even with an 8 GiB heap). Upstream packages through its own
+    # `builder` wrapper, which stages isolated prepared inputs before calling
+    # electron-builder; that path stays small. Version stamp and output dir are
+    # among the arguments the wrapper admits.
     pack=WORK/'packed'
     staged_count=0
-    # Native modules are already rebuilt and staged by upstream's own
-    # `npm run build`; electron-builder's redundant @electron/rebuild pass both
-    # duplicates that work and needs a full MSVC toolchain on Windows runners.
-    buildargs=[node,builder,{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never','-c.forceCodeSigning=false','-c.nativeModules.npmRebuild=false','-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]
-    if target=='darwin':
-        # Delay outer signing until all resources exist. Sign staged native bytes only
-        # after upstream beforePack re-stages them, BEFORE ASAR hashes are computed.
-        # electron-builder 27 moved the signing identity under mac.sign.
-        buildargs+=['-c.mac.sign=null','-c.beforePack='+str(ROOT/'scripts/before-pack-macos.mjs')]
-        env['DESKTOP_BUILD_PYTHON']=sys.executable
-        env['DESKTOP_BUILD_LOGS']=str(logs)
-    cmd('electron-builder',buildargs,desktop)
-    env.pop('DESKTOP_BUILD_PYTHON',None)
-    env.pop('DESKTOP_BUILD_LOGS',None)
-    dirname={'darwin':'mac-arm64' if arch=='arm64' else 'mac','win32':'win-unpacked','linux':'linux-unpacked'}[target]
-    original=pack/dirname/('Hermes.app' if target=='darwin' else '')
-    bundle=WORK/'bundle'/('Hermes.app' if target=='darwin' else 'Hermes')
+    packargs=[{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never',
+              '-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]
+    cmd('electron-builder',npm+['run','builder','--']+packargs,desktop)
+    # The packaged layout carries the architecture in its name; discover rather
+    # than hardcode so an upstream rename cannot silently mis-locate the app.
+    pattern={'darwin':'mac*/Hermes.app','win32':'win*/Hermes.exe','linux':'linux*/Hermes'}[target]
+    found=sorted(pack.glob(pattern))
+    if len(found)!=1:raise RuntimeError(f'Expected exactly one packaged app, found {len(found)}')
+    original=found[0]
+    bundle=WORK/'bundle'/(original.name if target=='darwin' else 'Hermes')
     bundle.parent.mkdir(exist_ok=True)
     shutil.move(str(original),str(bundle))
     resources=bundle/'Contents/Resources' if target=='darwin' else bundle/'resources'
@@ -134,8 +123,9 @@ def main():
         info=plistlib.loads((bundle/'Contents/Info.plist').read_bytes())
         if info['CFBundleExecutable']!='Hermes' or info['CFBundleIdentifier']!='com.nousresearch.hermes':raise RuntimeError('Wrong Mac bundle identity')
         cmd('mac-final-sign',[node,str(ROOT/'scripts/sign-macos.mjs'),str(src),str(bundle)],desktop)
-        staged_count=json.loads((logs/'mac-staged-native-count.json').read_text())['count']
-        if verify_bundle(bundle,arch,cmd,'mac-bundle-verify')!=staged_count:raise RuntimeError('Mac native signing count mismatch')
+        # Native payloads inside app.asar.unpacked are signed by upstream's own
+        # prepared-packaging stage; verify every one of them here.
+        staged_count=verify_bundle(bundle,arch,cmd,'mac-bundle-verify')
     natives=native_inventory(bundle,target,arch)
     (logs/'native-binaries.json').write_text(json.dumps(natives,indent=2)+'\n')
     cmd('inspect',[node,str(ROOT/'scripts/inspect.mjs'),str(src),str(resources),target,arch,str(logs)],ROOT)
