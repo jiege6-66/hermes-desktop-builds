@@ -194,6 +194,18 @@ UPSTREAM_TEST_DEFECTS = {
         ('apps/desktop/src/store/voice-prefs.test.ts',
          'migrates the legacy preference once, not on every refresh',
          'Same upstream localStorage spy defect as the toggle test.'),
+        # Verified locally at this pin: the assertion counts EVERY pending fake
+        # timer, so an unrelated backoff inflates it. A single failed
+        # refreshProfiles() (apps/desktop/src/store/profile.ts, 500ms retry)
+        # leaves exactly one pending timer next to the sweep's own, which is the
+        # "expected 1, got 2" reported on loaded runners. The invariant the test
+        # names — list churn must not stack a second SWEEP timer — still holds.
+        ('apps/desktop/src/store/dead-session-prune.test.ts',
+         'watchDeadSessionPrune clamps the debounce so list churn cannot starve the sweep',
+         'Asserts the global fake-timer count (vi.getTimerCount()); a pending '
+         'profile-list retry backoff from profile.ts makes it 2. Reproduced at this '
+         'pin: one failed refreshProfiles() leaves exactly 1 pending fake timer. '
+         'The sweep itself never stacks a second timer.'),
     ),
 }
 

@@ -201,4 +201,31 @@ class StepRunnerTests(unittest.TestCase):
             self.assertLess(elapsed,30)
             self.assertIn('EXIT_CODE',(logs/'leak.log').read_text())
 
+class UpstreamDefectRegistryTests(unittest.TestCase):
+    """Only the exact reviewed assertion may pass the gate; anything else blocks."""
+
+    PIN = {'repository': 'NousResearch/hermes-agent',
+           'commit': 'bf0203a794a07aac3ff764972ab9087baa4e4f4e',
+           'version': '0.22.5', 'revision': 1, 'node': '22.22.2'}
+
+    def _report(self, full_name):
+        return {'numTotalTests': 1, 'numPassedTests': 0, 'numFailedTests': 1,
+                'numPendingTests': 0, 'numTodoTests': 0, 'numRuntimeErrorTestSuites': 0,
+                'runCompletion': {'reason': 'failed', 'unhandledErrors': []},
+                'testResults': [{'name': '/src/apps/desktop/src/store/dead-session-prune.test.ts',
+                                 'status': 'failed',
+                                 'assertionResults': [{'status': 'failed', 'fullName': full_name}]}]}
+
+    def test_reviewed_timer_count_assertion_passes_the_gate(self):
+        gate = gate_test_report(
+            self._report('watchDeadSessionPrune clamps the debounce so list churn cannot starve the sweep'),
+            self.PIN, 1)
+        self.assertEqual(gate['failed'], 1)
+        self.assertEqual(len(gate['allowedFailures']), 1)
+        self.assertIn('profile.ts', gate['allowedFailures'][0]['reason'])
+
+    def test_a_different_assertion_in_the_same_file_still_blocks(self):
+        with self.assertRaises(ValueError):
+            gate_test_report(self._report('watchDeadSessionPrune sweeps once'), self.PIN, 1)
+
 if __name__=='__main__':unittest.main()
