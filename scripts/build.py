@@ -131,6 +131,11 @@ def main():
     if target=='darwin':
         info=plistlib.loads((bundle/'Contents/Info.plist').read_bytes())
         if info['CFBundleExecutable']!='Hermes' or info['CFBundleIdentifier']!='com.nousresearch.hermes':raise RuntimeError('Wrong Mac bundle identity')
+        # Packaging replaces the dist tree with its own native-deps staging, so the
+        # unpacked Mach-O payload is signed here, before the bundle is sealed.
+        cmd('mac-payload-sign',[sys.executable,str(ROOT/'scripts/macos_signing.py'),'--payload',str(bundle),
+                                '--arch',arch,'--logs',str(logs)])
+        staged_count=json.loads((logs/'mac-payload-native-count.json').read_text())['count']
         cmd('mac-final-sign',[node,str(ROOT/'scripts/sign-macos.mjs'),str(src),str(bundle)],desktop)
         # Payload natives were signed before packaging; confirm the packaged bytes
         # still verify and that packaging did not drop or add any of them.

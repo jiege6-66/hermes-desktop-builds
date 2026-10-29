@@ -142,16 +142,41 @@ def verify_extracted(bundle, arch, staged_count, cmd, logs):
     return receipt
 
 
+def sign_packaged_payload(bundle, arch, cmd):
+    """Sign Mach-O natives that ended up unpacked next to app.asar.
+
+    Upstream's prepared packaging copies its own native-deps staging over the
+    signed dist tree, so the packaged payload must be signed again here, before
+    the outer bundle signature seals it.
+    """
+    if sys.platform != 'darwin':
+        raise RuntimeError('Mac signing must run on a native Mac')
+    payload = bundle / 'Contents/Resources/app.asar.unpacked'
+    natives = native_inventory(payload, 'darwin', arch)
+    for index, native in enumerate(natives):
+        binary = payload / native['path']
+        cmd(f'mac-payload-sign-{index}', ['/usr/bin/codesign', '--force', '--sign', '-',
+                                         '--timestamp=none', str(binary)])
+        cmd(f'mac-payload-verify-{index}', ['/usr/bin/codesign', '--verify', '--strict', str(binary)])
+    return len(natives)
+
+
 if __name__ == '__main__':
     import argparse
     import os
     from common import ROOT, run
-    parser = argparse.ArgumentParser(description='Sign final staged Mac native dependencies')
-    parser.add_argument('--stage', type=Path, required=True)
+    parser = argparse.ArgumentParser(description='Sign Mac native payloads before or after packaging')
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--stage', type=Path, help='Built desktop tree whose dist natives to sign')
+    mode.add_argument('--payload', type=Path, help='Packaged Hermes.app whose unpacked natives to sign')
     parser.add_argument('--arch', choices=['arm64', 'x64'], required=True)
     parser.add_argument('--logs', type=Path, required=True)
     args = parser.parse_args()
     def command(label, argv):
         return run(label, argv, ROOT, os.environ.copy(), args.logs)
-    count = sign_staged_payloads(args.stage, args.arch, command)
-    (args.logs / 'mac-staged-native-count.json').write_text(json.dumps({'count': count}) + '\n')
+    if args.stage:
+        count = sign_staged_payloads(args.stage, args.arch, command)
+        (args.logs / 'mac-staged-native-count.json').write_text(json.dumps({'count': count}) + '\n')
+    else:
+        count = sign_packaged_payload(args.payload, args.arch, command)
+        (args.logs / 'mac-payload-native-count.json').write_text(json.dumps({'count': count}) + '\n')
