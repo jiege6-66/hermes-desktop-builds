@@ -96,16 +96,20 @@ def main():
     # among the arguments the wrapper admits.
     pack=WORK/'packed'
     staged_count=0
+    natives_arg=[]
     if target=='darwin':
-        # Upstream's prepared packaging reuses the already-built dist tree, so sign
-        # its native payloads here — BEFORE packaging hashes them into the ASAR.
-        env['DESKTOP_BUILD_PYTHON']=str(sys.executable)
-        cmd('mac-stage-sign',[sys.executable,str(ROOT/'scripts/macos_signing.py'),'--stage',str(desktop),
+        # Sign the staged native payload BEFORE electron-builder hashes it: hand the
+        # wrapper our own signed native-deps dir so its beforePack copies signed
+        # bytes into the app instead of re-staging unsigned ones.
+        natives_dir=desktop/'build'/f'native-deps-{target}-{arch}'
+        cmd('stage-native-deps',[node,str(desktop/'scripts/stage-native-deps.mjs'),'--source',str(src),
+                                 '--out',str(natives_dir),'--platform',target,'--arch',arch],desktop)
+        cmd('mac-stage-sign',[sys.executable,str(ROOT/'scripts/macos_signing.py'),'--stage',str(natives_dir),
                               '--arch',arch,'--logs',str(logs)])
         staged_count=json.loads((logs/'mac-staged-native-count.json').read_text())['count']
-        env.pop('DESKTOP_BUILD_PYTHON',None)
+        natives_arg=['--native-deps',str(natives_dir)]
     packargs=[{'darwin':'--mac','win32':'--win','linux':'--linux'}[target],'--dir','--'+arch,'--publish','never',
-              '-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]
+              '-c.extraMetadata.version='+pin['version'],'-c.directories.output='+str(pack)]+natives_arg
     cmd('electron-builder',npm+['run','builder','--']+packargs,desktop)
     # The packaged layout carries the architecture in its name; discover rather
     # than hardcode so an upstream rename cannot silently mis-locate the app.
@@ -131,14 +135,9 @@ def main():
     if target=='darwin':
         info=plistlib.loads((bundle/'Contents/Info.plist').read_bytes())
         if info['CFBundleExecutable']!='Hermes' or info['CFBundleIdentifier']!='com.nousresearch.hermes':raise RuntimeError('Wrong Mac bundle identity')
-        # Packaging replaces the dist tree with its own native-deps staging, so the
-        # unpacked Mach-O payload is signed here, before the bundle is sealed.
-        cmd('mac-payload-sign',[sys.executable,str(ROOT/'scripts/macos_signing.py'),'--payload',str(bundle),
-                                '--arch',arch,'--logs',str(logs)])
-        staged_count=json.loads((logs/'mac-payload-native-count.json').read_text())['count']
         cmd('mac-final-sign',[node,str(ROOT/'scripts/sign-macos.mjs'),str(src),str(bundle)],desktop)
-        # Payload natives were signed before packaging; confirm the packaged bytes
-        # still verify and that packaging did not drop or add any of them.
+        # Payload natives were signed before packaging; confirm packaging kept those
+        # exact bytes (count and per-file signatures).
         if verify_bundle(bundle,arch,cmd,'mac-bundle-verify')!=staged_count:raise RuntimeError('Mac native signing count mismatch')
     natives=native_inventory(bundle,target,arch)
     (logs/'native-binaries.json').write_text(json.dumps(natives,indent=2)+'\n')
