@@ -213,6 +213,18 @@ def main():
             suite_tmp=tempfile.mkdtemp(prefix='hv-',dir=os.environ['RUNNER_TEMP'])
             for name in ('TMPDIR','TMP','TEMP'):
                 env[name]=suite_tmp
+            # The doubled checkout also makes $HOME long enough that upstream's
+            # SSH control-socket root trips the same sun_path limit, so its own
+            # test observes the /tmp/hermes-ssh-<uid> fallback instead of the
+            # documented default. Keep the isolation, make it short.
+            short_home=Path(suite_tmp)/'home'
+            for extra in (short_home/'AppData/Roaming', short_home/'AppData/Local', short_home/'.cache'):
+                extra.mkdir(parents=True,exist_ok=True)
+            env.update({'HOME':str(short_home),'USERPROFILE':str(short_home),
+                        'HERMES_HOME':str(short_home/'.hermes'),
+                        'APPDATA':str(short_home/'AppData/Roaming'),'LOCALAPPDATA':str(short_home/'AppData/Local'),
+                        'XDG_CONFIG_HOME':str(short_home/'.config'),'XDG_CACHE_HOME':str(short_home/'.cache'),
+                        'XDG_DATA_HOME':str(short_home/'.local/share')})
             print('Short full-suite temp:',suite_tmp,flush=True)
         rc=cmd('upstream-full-tests',npm+['test','--','--maxWorkers=4','--reporter=default','--reporter=json','--outputFile.json='+str(report)]+reporter,desktop,True)
         data=json.loads(report.read_text());data['runCompletion']=json.loads((logs/'full-completion.json').read_text())
