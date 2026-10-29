@@ -58,3 +58,19 @@ scripts/macos_signing.py     Mac payload / bundle 签名与校验
 scripts/release.py           只认验证过的产物发版
 scripts/ci_receipt.py        发布前核对 CI 回执
 ```
+
+## 步骤必须有超时
+
+第一轮里四条线全都“编译完了但没结束”：打包、签名、ASAR 校验都在 4–12 分钟内完成，然后卡在启动冒烟上，
+一直到 70 分钟的 job 上限被杀。两个原因叠在一起：
+
+- `smoke.mjs` 里调用了一个在首启状态下永远不会返回的 IPC：`window.hermesDesktop.getVersion()`。
+  上游这个 handler 会先 `await detectRendererSkew()` / `resolveHermesVersion()`，没有后端时 Promise 一直挂着，
+  而 Playwright 的 `page.evaluate` 没有超时，于是整步无限等。
+- `common.run()` 只读子进程的 stdout 直到 EOF。Electron 的后代进程握着这个管道，父进程退出后管道关不上，
+  这一步也就永远不返回。
+
+现在两头都收紧：`run()` 支持 `timeout`，超时就杀掉整个进程组（子进程跑在独立 session 里），并把最后几十行
+输出带进异常；不再等管道 EOF。`smoke.mjs` 里每个 await 都有上限，另有 330 秒的总看门狗，超时会落一份
+`smoke-diagnostics.json`（URL、页面文本、控制台错误）。版本仍然要核对，但改成从主进程读 `app.getVersion()`，
+那条在首启阶段就能立刻返回。

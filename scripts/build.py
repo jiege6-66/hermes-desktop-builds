@@ -181,10 +181,14 @@ def main():
             command=[xvfb,'-a','-s','-screen 0 1280x1024x24']+command
         else:
             smoke_env['HERMES_SMOKE_HEADLESS']='1'
-    if target=='linux' and shutil.which('strace'):
+    if target=='linux' and os.environ.get('HERMES_SMOKE_STRACE')=='1' and shutil.which('strace'):
+        # Opt-in only: tracing every file/process syscall of Electron multiplies
+        # the launch time and buries a real failure under minutes of noise.
         command=[shutil.which('strace'),'-f','-e','trace=process,network,%file','-s','200','-o',str(logs/'native-strace.log')]+command
     try:
-        run('native-smoke',command,ROOT,smoke_env,logs)
+        # The smoke step launches a GUI process, so it is bounded explicitly: an
+        # IPC that never settles must fail in minutes, not at the job timeout.
+        run('native-smoke',command,ROOT,smoke_env,logs,timeout=420)
     finally:
         runtime_logs=WORK/'smoke/h/.hermes/logs'
         for name in ('desktop.log','gui.log'):

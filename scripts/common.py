@@ -1,10 +1,12 @@
 """Shared pin validation, isolated environment, logs and explicit test gates."""
 import json
-from collections import Counter
+from collections import Counter, deque
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
+import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,20 +76,83 @@ def clean_environment(work, pin, inherited=None):
     return env
 
 
-def run(label, command, cwd, env, logs, allow_failure=False):
+def _kill_tree(p):
+    """Kill the child and everything it spawned.
+
+    The child is started in its own session, so the traced/packaged process
+    tree (strace, xvfb-run, node, Electron helpers) dies as a group even when a
+    descendant ignores the direct signal.
+    """
+    try:
+        if os.name == 'posix':
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        else:
+            subprocess.run(['taskkill', '/F', '/T', '/PID', str(p.pid)],
+                           capture_output=True, check=False)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def run(label, command, cwd, env, logs, allow_failure=False, timeout=None):
+    """Run a step, streaming its output to the log.
+
+    A descendant that inherits stdout can outlive the child and keep the pipe
+    open, so output is read on a thread and the exit is waited for separately;
+    with `timeout` the whole process group is killed and the tail of the output
+    is reported, instead of blocking until the CI job limit.
+    """
     logs.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
-    with (logs/(label+'.log')).open('w', encoding='utf-8') as log:
-        log.write(json.dumps({'command':list(map(str,command)), 'cwd':str(cwd), 'envKeys':sorted(env)})+'\n')
+    log_path = logs/(label+'.log')
+    tail = deque(maxlen=60)
+    timed_out = False
+    with log_path.open('w', encoding='utf-8') as log:
+        log.write(json.dumps({'command':list(map(str,command)), 'cwd':str(cwd),
+                              'envKeys':sorted(env), 'timeout':timeout})+'\n')
         log.flush()
-        p = subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
-        for line in p.stdout:
-            print(line, end='', flush=True)
-            log.write(line)
-        rc = p.wait()
-        log.write(f'\nEXIT_CODE={rc}; SECONDS={time.monotonic()-start:.2f}\n')
+        p = subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+                             errors='replace', start_new_session=os.name == 'posix')
+        stop = threading.Event()
+        def pump():
+            try:
+                for line in (p.stdout or []):
+                    if stop.is_set():
+                        return
+                    print(line, end='', flush=True)
+                    log.write(line)
+                    log.flush()
+                    tail.append(line)
+            except (ValueError, OSError):
+                return
+        reader = threading.Thread(target=pump, daemon=True)
+        reader.start()
+        try:
+            rc = p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            print(f'\n{label}: exceeded {timeout}s, killing process group\n', flush=True)
+            _kill_tree(p)
+            try:
+                rc = p.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                rc = -signal.SIGKILL
+        reader.join(timeout=2)
+        if reader.is_alive():
+            # A descendant that inherited stdout can keep the pipe open after the
+            # child exited. Closing the pipe from here would block on the reader's
+            # own lock, so the daemon reader is simply abandoned: the step result
+            # must not wait for a process we no longer control.
+            stop.set()
+        elapsed = time.monotonic()-start
+        if timed_out:
+            log.write(f'\nTIMEOUT after {elapsed:.2f}s; process group killed\n')
+        log.write(f'\nEXIT_CODE={rc}; SECONDS={elapsed:.2f}\n')
+    if timed_out:
+        raise RuntimeError(f'{label} exceeded {timeout}s and was killed; '
+                           f'last output:\n{"".join(tail)}')
     if rc and not allow_failure:
-        raise RuntimeError(f'{label} failed with exit {rc}; see {logs/(label+".log")}')
+        raise RuntimeError(f'{label} failed with exit {rc}; see {log_path}')
     return rc
 
 

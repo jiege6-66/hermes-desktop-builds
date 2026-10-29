@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from common import validate_pin, clean_environment, gate_test_report
+from common import validate_pin, clean_environment, gate_test_report, run
 from package import binary_arches, make_archive, inventory, unpack_archive
 
 TEST_TMP=Path(__file__).resolve().parents[1]/'.work/test-tmp'
@@ -172,5 +172,33 @@ class BuildTests(unittest.TestCase):
                 self.assertEqual(inventory(app),inventory(target/app.name))
             (app/'bad').symlink_to('/etc/passwd')
             with self.assertRaises(ValueError):inventory(app)
+
+
+class StepRunnerTests(unittest.TestCase):
+    """A step that hangs must fail the step, not the whole CI job."""
+
+    @unittest.skipIf(sys.platform=='win32','uses POSIX shells for the hang fixture')
+    def test_run_kills_a_step_that_exceeds_its_timeout(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            logs=Path(tmp)/'logs'
+            started=_time.monotonic()
+            with self.assertRaises(RuntimeError) as caught:
+                run('hang',['/bin/sh','-c','echo started; sleep 120'],Path(tmp),{'PATH':'/usr/bin:/bin'},logs,timeout=2)
+            elapsed=_time.monotonic()-started
+            self.assertIn('exceeded 2s',str(caught.exception))
+            self.assertLess(elapsed,30)
+            self.assertIn('started',(logs/'hang.log').read_text())
+
+    @unittest.skipIf(sys.platform=='win32','uses POSIX shells for the hang fixture')
+    def test_run_does_not_block_on_a_descendant_holding_stdout(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            logs=Path(tmp)/'logs'
+            started=_time.monotonic()
+            rc=run('leak',['/bin/sh','-c','sleep 120 & echo child exited'],Path(tmp),{'PATH':'/usr/bin:/bin'},logs,timeout=2)
+            elapsed=_time.monotonic()-started
+            self.assertLess(elapsed,30)
+            self.assertIn('EXIT_CODE',(logs/'leak.log').read_text())
 
 if __name__=='__main__':unittest.main()
