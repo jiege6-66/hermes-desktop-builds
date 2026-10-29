@@ -158,7 +158,7 @@ First start offers both a local installation and **Connect to existing Hermes**;
 does not change that upstream behavior. Existing local runtimes can be discovered/started by
 upstream; review them before launching if that must be avoided.
 
-Installation, rollback and security notes: https://github.com/{REPO}#installation
+Installation, rollback and security notes: https://github.com/{REPO}#download
 Verify SHA256SUMS. Immutable version: assets under this tag must never be replaced.'''
     (destination/'RELEASE-NOTES.md').write_text(notes)
     return payload
